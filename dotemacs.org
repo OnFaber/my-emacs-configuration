@@ -1,0 +1,13 @@
+#+TITLE: My Emacs Configuration
+#+STARTUP: overview
+#+PROPERTY: header-args:emacs-lisp :tangle yes :file ./dotemacs.el
+
+* Package initialization
+
+#+begin_src emacs-lisp
+
+#+end_src
+
+* Built-in Packages
+* Thirdy-part Packages
+** 
