@@ -4,11 +4,17 @@
 
 * Package initialization
 
-#+begin_src emacs-lisp
+* Built-in Packages
+** Keybindings - Keymap.el
 
++ Path: /usr/local/share/emacs/31.0.50/lisp/keymap.el.gz
+
+This library deals with the "new" keymap binding interface: The
+only key syntax allowed by these functions is the `kbd' one.
+
+#+begin_src emacs-lisp
 #+end_src
 
-* Built-in Packages
 ** Eshell
 :PROPERTIES:
 :Manual: (info-display-manual "Eshell")
