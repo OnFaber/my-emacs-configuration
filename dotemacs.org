@@ -9,5 +9,16 @@
 #+end_src
 
 * Built-in Packages
+** Eshell
+:PROPERTIES:
+:Manual: (info-display-manual "Eshell")
+:Resources: [[https://www.emacswiki.org/emacs/EshellPrompt][emacs wiki]] 
+:END:
+  
+Eshell is a shell-like command interpreter implemented in Emacs Lisp.
+It invokes no external processes except for those requested by the user.
+It is intended to be an alternative to the IELM  REPL(1) for Emacs and with an interface similar to
+command shells such as ‘bash’, ‘zsh’, ‘rc’, or ‘4dos’.
+  
 * Thirdy-part Packages
 ** 
