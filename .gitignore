@@ -1,0 +1,17 @@
+# Si ignora tutto, poi si riammette solo la configurazione.
+# Così pacchetti scaricati, cache, history e backup non finiscono su GitHub.
+/*
+
+!/.gitignore
+!/README.org
+!/dotemacs.org
+!/early-init.el
+!/init.el
+!/dotemacs.el
+
+# Moduli scritti a mano (error-line-highlight, eglot-sqls...)
+!/core/
+/core/libs/
+
+# Se hai snippet personali di yasnippet, togli il # qui sotto
+# !/snippets/
