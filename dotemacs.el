@@ -1527,7 +1527,121 @@ Serve da limite alle regole che valgono solo dentro i tag Twig."
         '("pom.xml" "build.gradle" "settings.gradle" "pubspec.yaml" ".git"))
   (global-set-key (kbd "C-c p") 'projectile-command-map))
 
-(use-package magit)
+;; Richiede use-package (incluso in Emacs 29+) e un archivio MELPA configurato.
+;; Dipendenze di sistema opzionali (Arch):
+;;   sudo pacman -S ripgrep git-delta ttf-nerd-fonts-symbols
+
+;;; ---------------------------------------------------------------------------
+;;; Magit
+;;; ---------------------------------------------------------------------------
+
+(use-package magit
+  :ensure t
+  :bind (("C-x g"   . magit-status)
+         ("C-c g b" . magit-blame-addition)
+         ("C-c g l" . magit-log-buffer-file)
+         ("C-c g f" . magit-file-dispatch))
+  :custom
+  ;; Status a schermo intero, diff in una finestra separata
+  (magit-display-buffer-function #'magit-display-buffer-fullframe-status-v1)
+  (magit-bury-buffer-function #'magit-restore-window-configuration)
+
+  ;; Evidenzia le parole cambiate dentro ogni hunk (non solo le righe)
+  (magit-diff-refine-hunk 'all)
+  (magit-diff-refine-ignore-whitespace t)
+  (magit-diff-paint-whitespace-lines 'both)
+
+  ;; Salva i buffer modificati del repo senza chiedere
+  (magit-save-repository-buffers 'dontask)
+
+  ;; Repo da elencare con M-x magit-list-repositories (adatta il percorso)
+  (magit-repository-directories '(("~/Projects" . 2)
+                                  ("~/.emacs.d" . 0)))
+
+  ;; Sezioni: stash chiusi, untracked aperti
+  (magit-section-initial-visibility-alist '((stashes . hide)
+                                            (untracked . show)
+                                            (unpushed . show)))
+
+  ;; Margine nei log: data, autore
+  (magit-log-margin '(t "%Y-%m-%d %H:%M " magit-log-margin-width t 18))
+  (magit-log-section-commit-count 15)
+
+  ;; Messaggi di commit puliti
+  (git-commit-summary-max-length 50)
+  (git-commit-style-convention-checks '(non-empty-second-line overlong-summary-line))
+
+  ;; Popup transient in basso, a tutta larghezza
+  (transient-display-buffer-action '(display-buffer-below-selected
+                                     (dedicated . t)
+                                     (inhibit-same-window . t)))
+  :config
+  ;; Icone accanto ai file nello status (Magit 4.3+, richiede nerd-icons)
+  (when (and (boundp 'magit-format-file-function)
+             (fboundp 'magit-format-file-nerd-icons))
+    (setq magit-format-file-function #'magit-format-file-nerd-icons))
+
+  ;; Mostra i tag e le info dell'upstream nell'header dello status
+  (magit-add-section-hook 'magit-status-sections-hook
+                          'magit-insert-modules
+                          'magit-insert-stashes
+                          'append))
+
+;;; ---------------------------------------------------------------------------
+;;; diff-hl: segni nel margine per le righe modificate, sincronizzati con Magit
+;;; ---------------------------------------------------------------------------
+
+(use-package diff-hl
+  :ensure t
+  :hook ((after-init         . global-diff-hl-mode)
+         (dired-mode         . diff-hl-dired-mode)
+         (magit-pre-refresh  . diff-hl-magit-pre-refresh)
+         (magit-post-refresh . diff-hl-magit-post-refresh))
+  :custom
+  (diff-hl-draw-borders nil)
+  :config
+  (diff-hl-flydiff-mode 1)
+  ;; In terminale il fringe non esiste: usa il margine
+  (unless (display-graphic-p)
+    (diff-hl-margin-mode 1)))
+
+;;; ---------------------------------------------------------------------------
+;;; magit-todos: TODO/FIXME del repo direttamente nello status (usa ripgrep)
+;;; ---------------------------------------------------------------------------
+
+(use-package magit-todos
+  :ensure t
+  :after magit
+  :config
+  (magit-todos-mode 1))
+
+;;; ---------------------------------------------------------------------------
+;;; git-timemachine: sfoglia le versioni passate di un file (n/p per muoversi)
+;;; ---------------------------------------------------------------------------
+
+(use-package git-timemachine
+  :ensure t
+  :bind ("C-c g t" . git-timemachine-toggle))
+
+;;; ---------------------------------------------------------------------------
+;;; magit-delta: diff con syntax highlighting (richiede il binario `delta`)
+;;; Disattivato di default: su diff molto grandi può rallentare Magit.
+;;; Togli il commento per provarlo.
+;;; ---------------------------------------------------------------------------
+
+(use-package magit-delta
+  :ensure t
+  :hook (magit-mode . magit-delta-mode))
+
+;;; ---------------------------------------------------------------------------
+;;; Forge: issue e pull request di GitHub/GitLab dentro Magit (opzionale)
+;;; Serve un token in ~/.authinfo.gpg:
+;;;   machine api.github.com login TUO_USER^forge password ghp_XXXX
+;;; ---------------------------------------------------------------------------
+
+;; (use-package forge
+;;   :ensure t
+;;   :after magit)
 
 (use-package treemacs
   :config
@@ -1616,10 +1730,154 @@ Serve da limite alle regole che valgono solo dentro i tag Twig."
         eshell-visual-commands '("htop" "less" "more" "man" "top" "ssh"))
   :bind ("C-c RET" . eshell))
 
+;; Dipendenze di sistema (Arch) per compilare il modulo di vterm:
+;;   sudo pacman -S cmake libtool
+
+;;; ===========================================================================
+;;; VTERM — terminale vero (libvterm), per tutto ciò che è interattivo
+;;; ===========================================================================
+
 (use-package vterm
+  :ensure t
   :commands vterm
+  :bind (:map vterm-mode-map
+              ;; C-q manda il tasto successivo al terminale così com'è
+              ("C-q" . vterm-send-next-key))
   :custom
-  (vterm-max-scrollback 10000))
+  (vterm-max-scrollback 10000)
+  (vterm-kill-buffer-on-exit t)
+  ;; Nome del buffer = titolo impostato dalla shell (es. directory corrente)
+  (vterm-buffer-name-string "vterm: %s")
+  ;; Compila il modulo nativo senza chiedere al primo avvio
+  (vterm-always-compile-module t)
+  :hook
+  (vterm-mode . (lambda ()
+                  ;; Niente numeri di riga né hl-line dentro il terminale
+                  (display-line-numbers-mode -1)
+                  (hl-line-mode -1)
+                  (setq-local global-hl-line-mode nil))))
+
+;; Terminale "a scomparsa" in basso: stesso tasto per aprirlo e nasconderlo
+(use-package vterm-toggle
+  :ensure t
+  :after vterm
+  :bind (("C-c t" . vterm-toggle)
+         ("C-c T" . vterm-toggle-cd)) ; apre il terminale nella dir del buffer
+  :custom
+  (vterm-toggle-fullscreen-p nil)
+  (vterm-toggle-scope 'project)       ; un terminale per progetto
+  :config
+  (add-to-list 'display-buffer-alist
+               '((lambda (buffer-or-name _)
+                   (with-current-buffer buffer-or-name
+                     (derived-mode-p 'vterm-mode)))
+                 (display-buffer-reuse-window display-buffer-at-bottom)
+                 (reusable-frames . visible)
+                 (window-height . 0.3))))
+
+;; Per far seguire a Emacs la directory corrente della shell (find-file,
+;; magit-status ecc. aprono nella dir giusta), aggiungi al tuo ~/.bashrc
+;; o ~/.zshrc:
+;;
+;;   vterm_printf() {
+;;     if [ -n "$TMUX" ]; then
+;;       printf "\ePtmux;\e\e]%s\007\e\\" "$1"
+;;     else
+;;       printf "\e]%s\e\\" "$1"
+;;     fi
+;;   }
+;;   vterm_prompt_end() {
+;;     vterm_printf "51;A$(whoami)@$(hostname):$(pwd)"
+;;   }
+;;   if [[ "$INSIDE_EMACS" = 'vterm' ]]; then
+;;     # bash:
+;;     PS1=$PS1'\[$(vterm_prompt_end)\]'
+;;     # zsh (usa questa riga al posto di quella sopra):
+;;     # setopt PROMPT_SUBST; PROMPT=$PROMPT'%{$(vterm_prompt_end)%}'
+;;   fi
+
+;;; ===========================================================================
+;;; ESHELL — shell scritta in Elisp, integrata col resto di Emacs
+;;; ===========================================================================
+
+(defun my/eshell-git-branch ()
+  "Ritorna il branch git corrente, o nil."
+  (when (and (fboundp 'magit-get-current-branch)
+             (locate-dominating-file default-directory ".git"))
+    (magit-get-current-branch)))
+
+(defun my/eshell-prompt ()
+  "Prompt su due righe: directory, branch git, esito ultimo comando."
+  (let* ((dir    (abbreviate-file-name (eshell/pwd)))
+         (branch (my/eshell-git-branch))
+         (ok     (zerop eshell-last-command-status)))
+    (concat
+     "\n"
+     (propertize dir 'face '(:foreground "#61afef" :weight bold))
+     (when branch
+       (concat "  " (propertize (concat " " branch)
+                                'face '(:foreground "#c678dd"))))
+     (unless ok
+       (propertize (format "  ✘ %d" eshell-last-command-status)
+                   'face '(:foreground "#e06c75")))
+     "\n"
+     (propertize "λ" 'face (if ok
+                               '(:foreground "#98c379" :weight bold)
+                             '(:foreground "#e06c75" :weight bold)))
+     " ")))
+
+(use-package eshell
+  :ensure nil
+  :bind ("C-c e" . eshell)
+  :custom
+  (eshell-prompt-function #'my/eshell-prompt)
+  (eshell-prompt-regexp "^λ ")
+  (eshell-highlight-prompt nil)        ; i colori li gestisce il prompt
+  (eshell-history-size 10000)
+  (eshell-hist-ignoredups t)
+  (eshell-scroll-to-bottom-on-input 'this)
+  (eshell-destroy-buffer-when-process-dies t)
+  (eshell-banner-message "")
+  :hook
+  (eshell-mode . (lambda ()
+                   (display-line-numbers-mode -1)
+                   (setq-local global-hl-line-mode nil)
+                   ;; Alias comodi
+                   (eshell/alias "ll"   "ls -lah $*")
+                   (eshell/alias "ff"   "find-file $1")
+                   (eshell/alias "gs"   "magit-status")
+                   (eshell/alias "d"    "dired $1")
+                   (eshell/alias "up"   "sudo pacman -Syu"))))
+
+;; Comando `clear` che pulisce davvero il buffer
+(defun eshell/clear ()
+  "Svuota il buffer eshell."
+  (let ((inhibit-read-only t))
+    (erase-buffer)))
+
+;; Syntax highlighting dei comandi mentre scrivi (verde = esiste, rosso = no)
+(use-package eshell-syntax-highlighting
+  :ensure t
+  :after eshell
+  :config
+  (eshell-syntax-highlighting-global-mode 1))
+
+;; Suggerimenti in grigio dalla history, stile fish (accetta con →)
+(use-package capf-autosuggest
+  :ensure t
+  :hook (eshell-mode . capf-autosuggest-mode))
+
+;;; ===========================================================================
+;;; EAT — terminale in Elisp puro; usato qui dentro eshell per i programmi
+;;; "visuali" (htop, less, vim, nmtui…) che eshell da solo non gestisce bene
+;;; ===========================================================================
+
+(use-package eat
+  :ensure t
+  :hook ((eshell-load . eat-eshell-mode)
+         (eshell-load . eat-eshell-visual-command-mode))
+  :custom
+  (eat-kill-buffer-on-exit t))
 
 (use-package terminal-here
   :config
