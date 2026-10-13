@@ -227,9 +227,7 @@ Le variabili vengono lette da una shell di login: vanno definite in
 * Tema e Font
 ** Tema
 
-Snazzy (la palette che usavi a mano) da doom-themes: colori coerenti
-ovunque, compresi org, magit, treemacs, company e rainbow-delimiters.
-Per provare altri temi al volo: =C-c t= (=consult-theme=).
+Snazzy da doom-themes:  Per provare altri temi al volo: =C-c t= (=consult-theme=).
 
 #+begin_src emacs-lisp
 (use-package doom-themes
@@ -246,7 +244,6 @@ Per provare altri temi al volo: =C-c t= (=consult-theme=).
   (doom-themes-org-config))
 
 ;; Buffer "di servizio" (treemacs, popup, help) un filo più scuri:
-;; si distinguono a colpo d'occhio dai file su cui lavori
 (use-package solaire-mode
   :config (solaire-global-mode 1))
 
@@ -2507,7 +2504,7 @@ nell'ambiente; per spegnerlo: =MY_EXWM=0=.
   (setq exwm-manage-configurations
         '(((member exwm-class-name '("Terminator" "Brave-browser" "Nyxt" "st-256color"))
            char-mode t))))
-                                        ;)   ; chiude anche il when
+;;)  ; chiude anche il when
 
 #+end_src
 
