@@ -148,7 +148,7 @@ Modalità incluse in Emacs che Doom attiva per default.
   (global-auto-revert-mode 1)   ; ricarica i file cambiati da fuori (git, dotnet format)
   (save-place-mode 1)           ; riapre i file dove eri rimasto
   (global-so-long-mode 1)       ; niente blocchi su righe enormi (JSON, JS minificato)
-  ;; (editorconfig-mode 1)      ; rispetta il .editorconfig dei progetti
+  (editorconfig-mode 1)      ; rispetta il .editorconfig dei progetti
 )
 #+end_src
 
