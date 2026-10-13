@@ -278,7 +278,7 @@ Se un font manca si passa al successivo della lista.
   (set-face-attribute 'default nil :family mono :height 90 :weight 'regular)
   (set-face-attribute 'fixed-pitch nil :family mono))
 
-(when-let* ((testo (my/primo-font "Inter" "Noto Sans" "DejaVu Sans")))
+(when-let* ((testo (my/primo-font "DejaVu Sans" "Inter" "Noto Sans")))
   (set-face-attribute 'variable-pitch nil :family testo))
 
 ;; In org il testo normale usa il font proporzionale;
