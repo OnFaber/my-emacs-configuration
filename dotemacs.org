@@ -94,6 +94,35 @@ Il file =init.el= carica i pacchetti e poi questo file.
 ;;; dotemacs.el --- Configurazione principale -*- lexical-binding: t; -*-
 #+end_src
 
+#+begin_src emacs-lisp :tangle no
+;; Sessione: file aperti, posizione del cursore, registri e kill-ring
+;; vengono salvati all'uscita e ripristinati all'avvio
+(defconst my/desktop-directory (expand-file-name "desktop/" my/cache-directory)
+  "Dove salvare la sessione (file aperti, posizioni, history).")
+(make-directory my/desktop-directory t)
+
+(use-package desktop
+  :ensure nil
+  :custom
+  (desktop-path (list my/desktop-directory))
+  (desktop-save t)                          ; salva all'uscita senza chiedere
+  (desktop-load-locked-desktop 'check-pid)  ; dopo un crash ricarica comunque
+  (desktop-auto-save-timeout 300)           ; salva anche ogni 5 minuti di inattività
+  (desktop-restore-eager 8)                 ; 8 file subito, gli altri in sottofondo
+  (desktop-restore-frames nil)              ; non toccare frame/finestre (EXWM!)
+  (desktop-files-not-to-save "\\(\\`/[^/:]*:\\|(ftp)\\'\\|\\.gpg\\'\\)")
+  :config
+  ;; buffer che non ha senso ripristinare
+  (dolist (modo '(exwm-mode vterm-mode eshell-mode dashboard-mode
+                  dired-mode magit-mode magit-status-mode
+                  compilation-mode help-mode Info-mode))
+    (add-to-list 'desktop-modes-not-to-save modo))
+  ;; in più: registri, kill-ring e ricerche
+  (dolist (var '(register-alist kill-ring search-ring regexp-search-ring))
+    (add-to-list 'desktop-globals-to-save var))
+  (desktop-save-mode 1))
+#+end_src
+
 ** Fondamentali
 
 #+begin_src emacs-lisp
@@ -481,9 +510,30 @@ All'avvio: file recenti, progetti e agenda.
 ** Vundo
 
 #+begin_src emacs-lisp
+;; C-x u apre l'albero delle modifiche sotto al buffer
 (use-package vundo
   :bind ("C-x u" . vundo)
-  :custom (vundo-glyph-alist vundo-unicode-symbols))
+  :custom
+  (vundo-glyph-alist vundo-unicode-symbols)   ; ●──○ invece di o--x
+  (vundo-compact-display t)                   ; albero più stretto
+  (vundo-window-max-height 8)
+  :config
+  ;; i simboli dell'albero vanno allineati: sempre font monospazio
+  (set-face-attribute 'vundo-default nil :family (face-attribute 'fixed-pitch :family)))
+
+;; Più memoria per gli undo (valori di Doom): la cronologia non viene
+;; tagliata dopo poche centinaia di modifiche
+(setq undo-limit        (* 64 1024 1024)
+      undo-strong-limit (* 96 1024 1024)
+      undo-outer-limit  (* 960 1024 1024))
+
+;; La cronologia sopravvive anche alla chiusura del file e al riavvio
+(use-package undo-fu-session
+  :custom
+  (undo-fu-session-directory (expand-file-name "undo-fu-session/" my/cache-directory))
+  (undo-fu-session-incompatible-files '("\\.gpg\\'" "/COMMIT_EDITMSG\\'" "/git-rebase-todo\\'"))
+  :config
+  (undo-fu-session-global-mode 1))
 #+end_src
 
 * Completamento e Navigazione
@@ -916,7 +966,7 @@ Il completamento parte da solo dopo 1 carattere: niente tasto manuale
 
   ;; Titoli un po' più grandi, in scala
   (set-face-attribute 'org-document-title nil :height 1.5 :weight 'bold)
-  (dolist (face '((org-level-1 . 1.3)
+  (dolist (face '((org-level-1 . 1.2)
                   (org-level-2 . 1.15)
                   (org-level-3 . 1.05)))
     (set-face-attribute (car face) nil :height (cdr face) :weight 'semi-bold)))
@@ -926,6 +976,13 @@ Il completamento parte da solo dopo 1 carattere: niente tasto manuale
 ;; Stelle, liste, checkbox, tabelle, tag e blocchi resi graficamente
 (use-package org-modern
   :after org
+  :custom
+  ;; titoli: triangolo pieno se chiuso, aperto verso il basso se espanso
+  (org-modern-star 'fold)
+  (org-modern-fold-stars '((" " . " ") ("›" . "⌄") ("›" . "⌄") ("›" . "⌄") ("›" . "⌄")))
+  (org-modern-hide-stars nil)          ; niente stelle "fantasma" a sinistra
+  ;; elenchi
+  (org-modern-list '((?- . "•") (?+ . "◦") (?* . "▹")))
   :config
   (global-org-modern-mode)
   ;; mantieni lo stile anche nell'anteprima di consult
@@ -1033,7 +1090,7 @@ Il completamento parte da solo dopo 1 carattere: niente tasto manuale
 (use-package flycheck
   :init (global-flycheck-mode)
   :config
-  (add-hook 'eglot-managed-mode-hook (lamda () (flycheck-mode -1)))
+  (add-hook 'eglot-managed-mode-hook (lambda () (flycheck-mode -1)))
   (setq flycheck-check-syntax-automatically '(save mode-enabled))
   ;; include di GTK solo se installati (su Ubuntu servono i pacchetti -dev)
   (when (and (executable-find "pkg-config")
@@ -1090,6 +1147,72 @@ LSP-mode è usato solo per Java, Python e Vue.
   :bind (:map eglot-mode-map
               ("C-c C-d" . eglot-help-at-point)
               ("C-c C-r" . eglot-code-actions)))
+#+end_src
+
+#+begin_src emacs-lisp
+
+;; Code lens per eglot (sperimentale): es. "3 references" sopra i metodi C#
+(unless (package-installed-p 'eglot-codelens)
+  (package-vc-install "https://github.com/Gavinok/eglot-codelens"))
+
+;; csharp-ls invia le lens ma non sa eseguirle (niente workspace/executeCommand):
+;; al clic, se il server risponde "metodo non trovato", Emacs mostra da solo
+;; i riferimenti del simbolo sotto la lens, come fa VS Code.
+
+;; Lens di csharp-ls: "N Reference(s)" ha come comando textDocument/references,
+;; che il server non esegue (in VS Code lo fa l'editor). Lo facciamo fare a Emacs:
+;; andiamo sul simbolo indicato dalla lens e apriamo i riferimenti con xref.
+;; Inoltre eglot-codelens passa la lens intera invece del comando: lo estraiamo.
+
+(defun my/eglot-codelens--esegui (orig lens-o-comando)
+  "Esegue una lens; i riferimenti li mostra Emacs con xref."
+  (let* ((cmd (if (listp (plist-get lens-o-comando :command))
+                  (plist-get lens-o-comando :command)   ; era la lens intera
+                lens-o-comando))                        ; era già il comando
+         (nome (plist-get cmd :command)))
+    (if (equal nome "textDocument/references")
+        (let* ((params (elt (plist-get cmd :arguments) 0))
+               (posizione (plist-get params :position)))
+          (push-mark)                                   ; C-u C-SPC per tornare
+          (goto-char (funcall (if (fboundp 'eglot-lsp-position-to-point)
+                                  #'eglot-lsp-position-to-point
+                                #'eglot--lsp-position-to-point)
+                              posizione))
+          (xref-find-references (xref-backend-identifier-at-point (xref-find-backend))))
+      (funcall orig cmd))))
+
+(with-eval-after-load 'eglot-codelens
+  (advice-add 'eglot-codelens-execute :around #'my/eglot-codelens--esegui))
+
+;; csharp-ls all'avvio risponde "nessuna lens" finché non ha caricato il progetto:
+;; le richiediamo di nuovo dopo qualche secondo, e a ogni salvataggio
+(defun my/eglot-codelens--aggiorna (buf)
+  "Richiede di nuovo le lens per BUF, se è ancora aperto e gestito da eglot."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (when (and (bound-and-true-p eglot-codelens-mode) (eglot-managed-p))
+        (eglot-codelens-force-refresh-lens)))))
+
+(defun my/eglot-codelens-avvia ()
+  "Attiva le lens nel buffer e le aggiorna mentre il server finisce di caricare."
+  (when (eglot-managed-p)
+    (eglot-codelens-mode 1)
+    (let ((buf (current-buffer)))
+      (dolist (secondi '(3 8 20))          ; progetti grandi = caricamento più lungo
+        (run-with-timer secondi nil #'my/eglot-codelens--aggiorna buf)))
+    (add-hook 'after-save-hook
+              (lambda () (my/eglot-codelens--aggiorna (current-buffer)))
+              nil t)))
+
+(with-eval-after-load 'eglot-codelens
+  (add-hook 'eglot-managed-mode-hook #'my/eglot-codelens-avvia))
+
+(use-package eglot-codelens
+  :ensure nil
+  :after eglot
+  :config
+  (eglot-codelens-mode 1))
+
 #+end_src
 
 #+begin_src emacs-lisp
@@ -2368,8 +2491,128 @@ sostituirle: i progetti git restano riconosciuti anche senza Projectile.
                   (hl-line-mode -1)
                   (setq-local global-hl-line-mode nil))))
 
+;;; --- vterm a tendina (stile Yakuake) ----------------------------------------
+;; Un solo terminale, due modi di mostrarlo:
+;;   F12   → tendina in alto (apre/chiude); se era staccato, lo riporta in tendina
+;;   C-F12 → lo stacca: diventa una finestra normale in basso, spostabile
+
+(defvar my/vterm-tendina--buffer nil
+  "Il terminale della tendina (lo stesso, sia in tendina sia staccato).")
+
+(defun my/vterm-tendina--buffer ()
+  "Il terminale della tendina; lo crea se non c'è o se è stato chiuso."
+  (unless (buffer-live-p my/vterm-tendina--buffer)
+    (setq my/vterm-tendina--buffer
+          (save-window-excursion
+            (vterm (generate-new-buffer-name "*vterm tendina*")))))
+  my/vterm-tendina--buffer)
+
+(defun my/vterm-tendina--nascondi (win)
+  "Toglie WIN dallo schermo senza rompere il layout."
+  (if (window-deletable-p win)
+      (delete-window win)
+    ;; unica finestra rimasta: al suo posto torna il buffer precedente
+    (with-selected-window win
+      (switch-to-buffer (other-buffer (current-buffer) t)))))
+
+(defun my/vterm-tendina ()
+  "Apre o chiude il vterm a tendina in alto, stile Yakuake.
+Se il terminale era staccato in una finestra normale, lo riporta in tendina."
+  (interactive)
+  (let* ((buf (my/vterm-tendina--buffer))
+         (win (get-buffer-window buf)))
+    (if (and win (window-parameter win 'window-side))
+        (delete-window win)                       ; tendina aperta → chiudi
+      (when win (my/vterm-tendina--nascondi win)) ; era staccato → lo riprendo
+      (select-window
+       (display-buffer-in-side-window
+        buf '((side . top) (slot . 0) (window-height . 0.4)
+              (preserve-size . (nil . t))
+              (window-parameters . ((no-delete-other-windows . t)))))))))
+
+(defun my/vterm-tendina-stacca ()
+  "Mostra il terminale della tendina in una finestra normale in basso."
+  (interactive)
+  (let* ((buf (my/vterm-tendina--buffer))
+         (win (get-buffer-window buf)))
+    (when (and win (window-parameter win 'window-side))
+      (delete-window win))
+    (pop-to-buffer buf '((display-buffer-reuse-window display-buffer-at-bottom)
+                         (window-height . 0.3)))))
+
+(keymap-global-set "<f12>"   #'my/vterm-tendina)
+(keymap-global-set "C-<f12>" #'my/vterm-tendina-stacca)
+
+;; Dentro vterm F12 verrebbe mandato alla shell: lo riprendiamo per la tendina
+(with-eval-after-load 'vterm
+  (keymap-set vterm-mode-map "<f12>"   #'my/vterm-tendina)
+  (keymap-set vterm-mode-map "C-<f12>" #'my/vterm-tendina-stacca))
+
+;;; --- Terza modalità: terminale galleggiante (child frame) -------------------
+;; S-F12: lo stesso terminale della tendina, ma sopra a tutto (come Yakuake).
+
+(defvar my/vterm-galleggiante--origine nil
+  "Il frame da cui è stato aperto il terminale galleggiante.")
+
+(defun my/vterm-galleggiante--frame ()
+  "Il frame galleggiante del terminale, se è visibile."
+  (when-let* ((buf my/vterm-tendina--buffer)
+              ((buffer-live-p buf))
+              (f (buffer-local-value 'posframe--frame buf))
+              ((frame-live-p f))
+              ((frame-visible-p f)))
+    f))
+
+(defun my/vterm-galleggiante--chiudi ()
+  "Nasconde il terminale galleggiante e torna al frame di prima."
+  (when (frame-live-p my/vterm-galleggiante--origine)
+    (redirect-frame-focus my/vterm-galleggiante--origine nil)) ; tasti di nuovo al padre
+  (posframe-hide my/vterm-tendina--buffer)
+  (when (frame-live-p my/vterm-galleggiante--origine)
+    (select-frame-set-input-focus my/vterm-galleggiante--origine)))
+
+(defun my/vterm-galleggiante ()
+  "Apre o chiude il terminale della tendina come finestra galleggiante."
+  (interactive)
+  (require 'posframe)
+  (if (my/vterm-galleggiante--frame)
+      (my/vterm-galleggiante--chiudi)
+    (let ((buf (my/vterm-tendina--buffer)))
+      (when-let* ((win (get-buffer-window buf)))
+        (my/vterm-tendina--nascondi win))
+      (setq my/vterm-galleggiante--origine (selected-frame))
+      (let ((f (posframe-show buf
+                              :poshandler #'posframe-poshandler-frame-top-center
+                              :refposhandler (and (fboundp 'my/posframe-refposhandler-exwm)
+                                                  #'my/posframe-refposhandler-exwm)
+                              :width  (round (* 0.8 (frame-width)))
+                              :height (round (* 0.4 (frame-height)))
+                              :border-width 2
+                              :border-color (face-foreground 'font-lock-keyword-face nil t)
+                              :accept-focus t
+                              :cursor 'box
+                              :respect-mode-line t
+                              :lines-truncate t)))
+        ;; Il focus di X resta al workspace (EXWM lo vuole lì),
+        ;; ma i tasti che arrivano al workspace vanno al terminale
+        (redirect-frame-focus my/vterm-galleggiante--origine f)
+        (select-frame f)
+        (select-window (frame-root-window f))))))
+
+;; F12 e C-F12 devono prima chiudere il galleggiante, se è aperto
+(defun my/vterm-galleggiante--prima-chiudi (&rest _)
+  (when (my/vterm-galleggiante--frame)
+    (my/vterm-galleggiante--chiudi)))
+(advice-add 'my/vterm-tendina       :before #'my/vterm-galleggiante--prima-chiudi)
+(advice-add 'my/vterm-tendina-stacca :before #'my/vterm-galleggiante--prima-chiudi)
+
+(keymap-global-set "S-<f12>" #'my/vterm-galleggiante)
+(with-eval-after-load 'vterm
+  (keymap-set vterm-mode-map "S-<f12>" #'my/vterm-galleggiante))
+
 ;; Terminale "a scomparsa" in basso: stesso tasto per aprirlo e nasconderlo
 (use-package vterm-toggle
+  :disabled
   :ensure t
   :bind (("C-c t" . vterm-toggle)
          ("C-c T" . vterm-toggle-cd))
@@ -2379,9 +2622,7 @@ sostituirle: i progetti git restano riconosciuti anche senza Projectile.
   :config
   (add-to-list 'display-buffer-alist
                '("\\`\\*?vterm"
-                 (display-buffer-reuse-window display-buffer-in-side-window)
-                 (side . bottom)
-                 (slot . 0)
+                 (display-buffer-reuse-window display-buffer-at-bottom)
                  (window-height . 0.3)
                  (reusable-frames . visible))))
 
@@ -2553,6 +2794,40 @@ nell'ambiente; per spegnerlo: =MY_EXWM=0=.
         '(((member exwm-class-name '("Terminator" "Brave-browser" "Nyxt" "st-256color"))
            char-mode t))))
 ;;)  ; chiude anche il when
+
+#+end_src
+
+** Desktop environment
+
+#+begin_src emacs-lisp
+;;; --- Tasti multimediali con EXWM (volume, luminosità, screenshot...) -------
+;; Solo dove c'è EXWM: su Ubuntu/GNOME questi tasti li gestisce già GNOME.
+;; Programmi necessari (Arch):
+;;   sudo pacman -S alsa-utils brightnessctl scrot slock playerctl
+
+(when my/exwm-p
+  (use-package desktop-environment
+    :after exwm
+    :custom
+    ;; Volume: passi da 5%, con Shift da 1%
+    (desktop-environment-volume-normal-increment "5%+")
+    (desktop-environment-volume-normal-decrement "5%-")
+    ;; Luminosità: passi da 5%, con Shift da 1%
+    (desktop-environment-brightness-normal-increment "5%+")
+    (desktop-environment-brightness-normal-decrement "5%-")
+    (desktop-environment-brightness-small-increment "1%+")
+    (desktop-environment-brightness-small-decrement "1%-")
+    ;; Screenshot nella cartella Immagini vera (in italiano non è ~/Pictures)
+    (desktop-environment-screenshot-directory
+     (or (ignore-errors (require 'xdg) (xdg-user-dir "PICTURES"))
+         "~/Immagini"))
+    ;; I tasti diventano globali in EXWM: funzionano anche sopra Brave & co.
+    (desktop-environment-update-exwm-global-keys :global)
+    :config
+    ;; s-l blocca lo schermo, ma per te s-l è windmove-right: lo togliamo.
+    ;; Per bloccare restano il tasto XF86ScreenSaver e il comando qui sotto.
+    (keymap-unset desktop-environment-mode-map "s-l" t)
+    (desktop-environment-mode 1)))
 
 #+end_src
 
