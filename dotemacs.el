@@ -336,13 +336,35 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
   :after company
   :hook (company-mode . company-box-mode))
 
-;; Incluso in Emacs 30; su Emacs 29 viene scaricato da MELPA
 (use-package which-key
+  :ensure t                 ; su Emacs 30 è già incluso, su Ubuntu (29.3) lo scarica
+  :custom
+  (which-key-idle-delay 0.4)
+  (which-key-idle-secondary-delay 0.05)   ; dopo il primo popup, i successivi sono immediati
+  (which-key-separator " → ")
+  (which-key-prefix-prefix "+")           ; i prefissi (sottomenu) iniziano con +
+  (which-key-sort-order #'which-key-prefix-then-key-order) ; prima i sottomenu, poi i comandi
+  (which-key-add-column-padding 2)
+  (which-key-max-description-length 35)
   :config
-  (setq which-key-show-early-on-C-h t
-        which-key-idle-delay 0.5
-        which-key-idle-secondary-delay 0.5)
-  (which-key-mode))
+  (which-key-mode 1)
+  ;; Nomi leggibili per i tuoi prefissi
+  (which-key-add-key-based-replacements
+    "C-c g" "git"
+    "C-c t" "terminale"
+    "C-c T" "terminale qui"
+    "C-c e" "eshell"))
+
+(use-package which-key-posframe
+  :ensure t
+  :after which-key
+  :custom
+  (which-key-posframe-poshandler #'posframe-poshandler-frame-center)
+  (which-key-posframe-border-width 2)
+  (which-key-posframe-parameters '((left-fringe . 10)
+                                   (right-fringe . 10)))
+  :config
+  (which-key-posframe-mode 1))
 
 (require 'warnings)                     ; definisce warning-suppress-types
 (add-to-list 'warning-suppress-types '(yasnippet backquote-change))
@@ -1760,20 +1782,19 @@ Serve da limite alle regole che valgono solo dentro i tag Twig."
 ;; Terminale "a scomparsa" in basso: stesso tasto per aprirlo e nasconderlo
 (use-package vterm-toggle
   :ensure t
-  :after vterm
   :bind (("C-c t" . vterm-toggle)
-         ("C-c T" . vterm-toggle-cd)) ; apre il terminale nella dir del buffer
+         ("C-c T" . vterm-toggle-cd))
   :custom
   (vterm-toggle-fullscreen-p nil)
-  (vterm-toggle-scope 'project)       ; un terminale per progetto
+  (vterm-toggle-scope 'project)
   :config
   (add-to-list 'display-buffer-alist
-               '((lambda (buffer-or-name _)
-                   (with-current-buffer buffer-or-name
-                     (derived-mode-p 'vterm-mode)))
-                 (display-buffer-reuse-window display-buffer-at-bottom)
-                 (reusable-frames . visible)
-                 (window-height . 0.3))))
+               '("\\`\\*?vterm"
+                 (display-buffer-reuse-window display-buffer-in-side-window)
+                 (side . bottom)
+                 (slot . 0)
+                 (window-height . 0.3)
+                 (reusable-frames . visible))))
 
 ;; Per far seguire a Emacs la directory corrente della shell (find-file,
 ;; magit-status ecc. aprono nella dir giusta), aggiungi al tuo ~/.bashrc
