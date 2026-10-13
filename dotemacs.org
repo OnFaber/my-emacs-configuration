@@ -343,7 +343,17 @@ cursore. Utile per orientarsi nei file grandi.
 
 #+begin_src emacs-lisp
 (use-package breadcrumb
-  :hook (eglot-managed-mode . breadcrumb-local-mode))
+  :config
+  (add-to-list 'mode-line-misc-info
+               '(:eval (breadcrumb-imenu-crumbs))))
+#+end_src
+
+** Topsy
+
+#+begin_src emacs-lisp
+(use-package topsy
+  :ensure t
+  :hook (prog-mode . topsy-mode))
 #+end_src
 
 ** Finestre
