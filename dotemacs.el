@@ -620,7 +620,7 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
 (defun my/prog-mode-setup ()
   (display-line-numbers-mode)
   (hs-minor-mode)
-  (sideline-mode)
+  ;; (sideline-mode)
   (indent-bars-mode)
   (subword-mode))
 
@@ -1674,82 +1674,83 @@ sullo schermo dove stai lavorando."
     (setq this-command command)
     (call-interactively command)))
 
-(defconst my/exwm-p
-  (pcase (getenv "MY_EXWM")
-    ("1" t)
-    ("0" nil)
-    (_ (and (eq window-system 'x)
-            (member (getenv "XDG_CURRENT_DESKTOP") '(nil "" "EXWM"))
-            t)))
-  "Non-nil se questa sessione deve usare EXWM come window manager.")
+;; (defconst my/exwm-p
+;;   (pcase (getenv "MY_EXWM")
+;;     ("1" t)
+;;     ("0" nil)
+;;     (_ (and (eq window-system 'x)
+;;             (member (getenv "XDG_CURRENT_DESKTOP") '(nil "" "EXWM"))
+;;             t)))
+;;   "Non-nil se questa sessione deve usare EXWM come window manager.")
 
-  ;; Launcher di applicazioni (.desktop) via completing-read → Vertico.
-  ;; Non è su MELPA: package-vc-install (Emacs 29+) lo scarica da GitHub
-  ;; la prima volta. Non uso :vc di use-package perché esiste solo da Emacs 30.
-  (when (and my/exwm-p (not (package-installed-p 'app-launcher)))
-    (package-vc-install "https://github.com/SebastienWae/app-launcher"))
+(use-package xdg-launcher
+  :vc (:url "https://github.com/emacs-exwm/xdg-launcher" :rev :newest)
+  :demand t
+  :config
+  (with-eval-after-load 'consult
+    (let ((tail (or (memq 'consult-source-buffer consult-buffer-sources)
+                    (memq 'consult--source-buffer consult-buffer-sources))))
+      (if tail
+          (push 'xdg-launcher-consult-source (cdr tail))
+        (add-to-list 'consult-buffer-sources 'xdg-launcher-consult-source 'append)))))
 
-  (use-package app-launcher
-    :if my/exwm-p
-    :ensure nil
-    :commands app-launcher-run-app)
+(defvar $mod "s")
 
-  (defvar $mod "s")
+;; `when' e non `:if': con `:if' use-package scarica comunque il
+;; pacchetto (l'installazione avviene prima del controllo)
+                                        ; (when my/exwm-p
+(use-package exwm-modeline
+  :after exwm
+  :hook (exwm-init . exwm-modeline-mode))
 
-  ;; `when' e non `:if': con `:if' use-package scarica comunque il
-  ;; pacchetto (l'installazione avviene prima del controllo)
-  (when my/exwm-p
-  (use-package exwm-modeline
-    :after exwm
-    :hook (exwm-init . exwm-modeline-mode))
-
-  (use-package exwm
-    :init
-    (setq exwm-input-global-keys
-          `((,(kbd (format "%s-!" $mod))         . delete-other-windows)
-            (,(kbd (format "%s-<left>" $mod))     . shrink-window-horizontally)
-            (,(kbd (format "%s-<right>" $mod))    . enlarge-window-horizontally)
-            (,(kbd (format "%s-{" $mod))          . tab-bar-switch-to-prev-tab)
-            (,(kbd (format "%s-}" $mod))          . tab-bar-switch-to-next-tab)
-            (,(kbd (format "%s-t" $mod))          . tab-bar-new-tab)
-            (,(kbd (format "%s-w" $mod))          . tab-bar-close-tab)
-            (,(kbd (format "%s-<return>" $mod))   . vterm)
-            (,(kbd (format "%s-d" $mod))          . app-launcher-run-app)
-            (,(kbd (format "%s-m" $mod))          . exwm-input-toggle-keyboard)
-            (,(kbd (format "%s-n" $mod))          . next-buffer)
-            (,(kbd (format "%s-o" $mod))          . ace-window)
-            (,(kbd (format "%s-O" $mod))          . delete-window)
-            (,(kbd (format "%s-p" $mod))          . previous-buffer)
-            (,(kbd (format "%s-q" $mod))          . exwm-workspace-delete)
-            (,(kbd (format "%s-Q" $mod))          . kill-current-buffer)
-            (,(kbd (format "%s-r" $mod))          . exwm-reset)
-            (,(kbd (format "%s-s" $mod))          . split-window-below)
-            (,(kbd (format "%s-S" $mod))          . split-window-right)
-            (,(kbd (format "%s-x" $mod))          . execute-extended-command)
-            ,@(mapcar (lambda (i)
-                        `(,(kbd (format "%s-%d" $mod i)) .
-                          (lambda () (interactive)
-                            (exwm-workspace-switch-create ,(1- i)))))
-                      (number-sequence 1 9))
-            ,@(mapcar (lambda (arg)
-                        `(,(kbd (format "%s-%s" $mod (car arg))) .
-                          ,(intern (concat "windmove-" (cadr arg)))))
-                      '(("h" "left") ("j" "down") ("k" "up") ("l" "right")))
-            ,@(mapcar (lambda (arg)
-                        `(,(kbd (format "%s-%s" $mod (car arg))) .
-                          ,(intern (concat "windmove-swap-states-" (cadr arg)))))
-                      '(("H" "left") ("J" "down") ("K" "up") ("L" "right")))))
-    (exwm-wm-mode)
-    :hook ((exwm-update-class . (lambda () (exwm-workspace-rename-buffer exwm-class-name)))
-           (exwm-manage-finish . exwm-layout-hide-mode-line))
-    :config
-    (require 'exwm-randr)
-    (exwm-randr-mode 1)
-    (setq exwm-randr-workspace-monitor-plist '(0 "HDMI-1" 1 "eDP-1"))
-    (setq exwm-workspace-index-map (lambda (index) (number-to-string (1+ index))))
-    (setq exwm-manage-configurations
-          '(((member exwm-class-name '("Terminator" "Brave-browser" "Nyxt" "st-256color"))
-             char-mode t)))))   ; chiude anche il when
+(use-package exwm
+  :init
+  (setq exwm-input-global-keys
+        `((,(kbd (format "%s-!" $mod))         . delete-other-windows)
+          (,(kbd (format "%s-<left>" $mod))     . shrink-window-horizontally)
+          (,(kbd (format "%s-<right>" $mod))    . enlarge-window-horizontally)
+          (,(kbd (format "%s-{" $mod))          . tab-bar-switch-to-prev-tab)
+          (,(kbd (format "%s-}" $mod))          . tab-bar-switch-to-next-tab)
+          (,(kbd (format "%s-t" $mod))          . tab-bar-new-tab)
+          (,(kbd (format "%s-w" $mod))          . tab-bar-close-tab)
+          (,(kbd (format "%s-<return>" $mod))   . vterm)
+          (,(kbd (format "%s-d" $mod))          . xdg-launcher-run-app)
+          (,(kbd (format "%s-m" $mod))          . exwm-input-toggle-keyboard)
+          (,(kbd (format "%s-n" $mod))          . next-buffer)
+          (,(kbd (format "%s-o" $mod))          . ace-window)
+          (,(kbd (format "%s-O" $mod))          . delete-window)
+          (,(kbd (format "%s-p" $mod))          . previous-buffer)
+          (,(kbd (format "%s-q" $mod))          . exwm-workspace-delete)
+          (,(kbd (format "%s-Q" $mod))          . kill-current-buffer)
+          (,(kbd (format "%s-r" $mod))          . exwm-reset)
+          (,(kbd (format "%s-s" $mod))          . split-window-below)
+          (,(kbd (format "%s-S" $mod))          . split-window-right)
+          (,(kbd (format "%s-x" $mod))          . execute-extended-command)
+          ,@(mapcar (lambda (i)
+                      `(,(kbd (format "%s-%d" $mod i)) .
+                        (lambda () (interactive)
+                          (exwm-workspace-switch-create ,(1- i)))))
+                    (number-sequence 1 9))
+          ,@(mapcar (lambda (arg)
+                      `(,(kbd (format "%s-%s" $mod (car arg))) .
+                        ,(intern (concat "windmove-" (cadr arg)))))
+                    '(("h" "left") ("j" "down") ("k" "up") ("l" "right")))
+          ,@(mapcar (lambda (arg)
+                      `(,(kbd (format "%s-%s" $mod (car arg))) .
+                        ,(intern (concat "windmove-swap-states-" (cadr arg)))))
+                    '(("H" "left") ("J" "down") ("K" "up") ("L" "right")))))
+  (exwm-wm-mode)
+  :hook ((exwm-update-class . (lambda () (exwm-workspace-rename-buffer exwm-class-name)))
+         (exwm-manage-finish . exwm-layout-hide-mode-line))
+  :config
+  (require 'exwm-randr)
+  (exwm-randr-mode 1)
+  (setq exwm-randr-workspace-monitor-plist '(0 "HDMI-1" 1 "eDP-1"))
+  (setq exwm-workspace-index-map (lambda (index) (number-to-string (1+ index))))
+  (setq exwm-manage-configurations
+        '(((member exwm-class-name '("Terminator" "Brave-browser" "Nyxt" "st-256color"))
+           char-mode t))))
+                                        ;)   ; chiude anche il when
 
 (use-package peek
   :disabled
