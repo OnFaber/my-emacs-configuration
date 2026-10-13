@@ -38,7 +38,7 @@
   (global-auto-revert-mode 1)   ; ricarica i file cambiati da fuori (git, dotnet format)
   (save-place-mode 1)           ; riapre i file dove eri rimasto
   (global-so-long-mode 1)       ; niente blocchi su righe enormi (JSON, JS minificato)
-  ;; (editorconfig-mode 1)      ; rispetta il .editorconfig dei progetti
+  (editorconfig-mode 1)      ; rispetta il .editorconfig dei progetti
 )
 
 (use-package exec-path-from-shell
@@ -107,7 +107,6 @@
   (doom-themes-org-config))
 
 ;; Buffer "di servizio" (treemacs, popup, help) un filo più scuri:
-;; si distinguono a colpo d'occhio dai file su cui lavori
 (use-package solaire-mode
   :config (solaire-global-mode 1))
 
@@ -134,7 +133,7 @@
   (set-face-attribute 'default nil :family mono :height 90 :weight 'regular)
   (set-face-attribute 'fixed-pitch nil :family mono))
 
-(when-let* ((testo (my/primo-font "Inter" "Noto Sans" "DejaVu Sans")))
+(when-let* ((testo (my/primo-font "DejaVu Sans" "Inter" "Noto Sans")))
   (set-face-attribute 'variable-pitch nil :family testo))
 
 ;; In org il testo normale usa il font proporzionale;
@@ -179,14 +178,19 @@
   (nyan-start-animation))
 
 (use-package breadcrumb
-  :hook (eglot-managed-mode . breadcrumb-local-mode))
+  :config
+  (add-to-list 'mode-line-misc-info
+               '(:eval (breadcrumb-imenu-crumbs))))
+
+(use-package topsy
+  :ensure t
+  :hook (prog-mode . topsy-mode))
 
 (use-package spacious-padding
-  :disabled
   :custom
-  (spacious-padding-widths '(:internal-border-width 14
-                             :right-divider-width 14
-                             :mode-line-width 4
+  (spacious-padding-widths '(:internal-border-width 8
+                             :right-divider-width 8
+                             :mode-line-width 1
                              :fringe-width 8))
   :config
   (spacious-padding-mode 1))
@@ -253,11 +257,29 @@
         indent-bars-highlight-current-depth '(:blend 0.5)
         indent-bars-display-on-blank-lines t))
 
+(use-package helpful
+  :bind (([remap describe-function] . helpful-callable)
+         ([remap describe-variable] . helpful-variable)
+         ([remap describe-key]      . helpful-key)
+         ([remap describe-command]  . helpful-command)
+         ([remap describe-symbol]   . helpful-symbol)
+         :map emacs-lisp-mode-map
+         ("C-c C-d" . helpful-at-point)))
+
+(use-package elisp-demos
+  :after helpful
+  :config
+  (advice-add 'helpful-update :after #'elisp-demos-advice-helpful-update))
+
 (use-package ediff
   :ensure nil
   :config
   (setq ediff-split-window-function 'split-window-horizontally
         ediff-window-setup-function 'ediff-setup-windows-plain))
+
+(use-package vundo
+  :bind ("C-x u" . vundo)
+  :custom (vundo-glyph-alist vundo-unicode-symbols))
 
 (defun my/posframe-refposhandler-exwm (&optional _frame)
   "Origine (x . y) dello schermo del workspace EXWM attivo.
@@ -312,7 +334,54 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
 
 (use-package wgrep)
 
+(defvar my/corfu-exwm-y-adjust 25
+  "Pixel da aggiungere in verticale al popup di corfu sotto EXWM.")
+
+(defvar my/corfu--in-popup nil)
+
+(defun my/corfu-popup-show-exwm (orig &rest args)
+  (let ((my/corfu--in-popup t))
+    (apply orig args)))
+
+(defun my/corfu-make-frame-exwm (args)
+  "Sotto EXWM aggiunge alla posizione del popup l'origine del monitor attivo."
+  (if-let* ((my/corfu--in-popup)
+            (off (my/posframe-refposhandler-exwm)))
+      (pcase-let ((`(,frame ,x ,y . ,rest) args))
+        `(,frame ,(+ x (car off)) ,(+ y (cdr off) my/corfu-exwm-y-adjust) ,@rest))
+    args))
+
+(with-eval-after-load 'corfu
+  (advice-add 'corfu--popup-show :around #'my/corfu-popup-show-exwm)
+  (advice-add 'corfu--make-frame :filter-args #'my/corfu-make-frame-exwm))
+
+(use-package corfu
+  :custom
+  (corfu-auto t)
+  (corfu-auto-delay 0.1)
+  (corfu-auto-prefix 1)
+  (corfu-cycle t)
+  (corfu-popupinfo-delay '(0.5 . 0.2))
+  :init (global-corfu-mode)
+  :config
+  (corfu-popupinfo-mode)   ; documentazione accanto al candidato
+  (corfu-history-mode))    ; ordina per uso recente (con savehist che hai già)
+
+(use-package nerd-icons-corfu
+  :after corfu
+  :config (add-to-list 'corfu-margin-formatters #'nerd-icons-corfu-formatter))
+
+(use-package cape
+  :init
+  (add-hook 'completion-at-point-functions #'cape-file)
+  (add-hook 'completion-at-point-functions #'cape-dabbrev))
+
+(use-package yasnippet-capf
+  :after cape
+  :init (add-hook 'completion-at-point-functions #'yasnippet-capf))
+
 (use-package company
+  :disabled
   :hook (after-init . global-company-mode)
   :custom
   (company-idle-delay 0.1)
@@ -327,12 +396,14 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
                            company-web-html)))
 
 (use-package company-web
+  :disabled
   :after company
   :config
   (require 'company-web-html))
 
 ;; company-box mostra già la documentazione: company-quickhelp non serve
 (use-package company-box
+  :disabled
   :after company
   :hook (company-mode . company-box-mode))
 
@@ -389,7 +460,7 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
          ("C-c k"   . consult-kmacro)              ; esegui una macro dal ring
          ("C-c m"   . consult-man)
          ("C-c i"   . consult-info)
-         ("C-c t"   . consult-theme)
+         ("C-c M-t"   . consult-theme)
          ("C-c y"   . consult-yank-from-kill-ring)
          ("C-c Y"   . consult-yank-replace)        ; sostituisce l'ultimo yank
          ([remap Info-search] . consult-info)
@@ -642,7 +713,8 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
 (defun my/prog-mode-setup ()
   (display-line-numbers-mode)
   (hs-minor-mode)
-  ;; (sideline-mode)
+  (sideline-mode)
+  (setq-local truncate-lines t)
   (indent-bars-mode)
   (subword-mode))
 
@@ -670,6 +742,7 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
 (use-package flycheck
   :init (global-flycheck-mode)
   :config
+  (add-hook 'eglot-managed-mode-hook (lamda () (flycheck-mode -1)))
   (setq flycheck-check-syntax-automatically '(save mode-enabled))
   ;; include di GTK solo se installati (su Ubuntu servono i pacchetti -dev)
   (when (and (executable-find "pkg-config")
@@ -695,7 +768,7 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
   (add-hook 'eglot-managed-mode-hook
             (lambda () (eglot-inlay-hints-mode 1)))
   (add-to-list 'eglot-server-programs
-               '((csharp-mode csharp-ts-mode) . ("csharp-ls")))
+               '((csharp-mode csharp-ts-mode) . ("env" "LC_ALL=C.UTF-8" "csharp-ls")))
   (add-to-list 'eglot-server-programs
                '(sass-mode . ("some-sass-language-server" "--stdio")))
   (add-to-list 'eglot-server-programs
@@ -715,6 +788,11 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
   :bind (:map eglot-mode-map
               ("C-c C-d" . eglot-help-at-point)
               ("C-c C-r" . eglot-code-actions)))
+
+  (use-package eglot-booster
+    :vc (:url "https://github.com/jdtsmith/eglot-booster")
+    :after eglot
+    :config (eglot-booster-mode))
 
 (use-package eglot-sqls
   :ensure nil
@@ -1015,7 +1093,8 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
   :bind (:map java-mode-map
               ("C-h j" . javadoc-lookup)))
 
-(use-package python-mode
+(use-package python
+  :ensure nil
   :hook (python-mode . lsp))
 
 (defun my/flutter-project-p ()
@@ -1578,7 +1657,7 @@ Serve da limite alle regole che valgono solo dentro i tag Twig."
 
   ;; Repo da elencare con M-x magit-list-repositories (adatta il percorso)
   (magit-repository-directories '(("~/Projects" . 2)
-                                  ("~/.emacs.d" . 0)))
+                                  ("~/.config/emacs" . 0)))
 
   ;; Sezioni: stash chiusi, untracked aperti
   (magit-section-initial-visibility-alist '((stashes . hide)
@@ -1693,130 +1772,6 @@ Serve da limite alle regole che valgono solo dentro i tag Twig."
 (use-package nerd-icons-dired
   :hook (dired-mode . nerd-icons-dired-mode))
 
-(defcustom e-path-max-len 30
-  "Default maximum length for path."
-  :type 'number)
-
-(defun e-git-prompt--git-root-dir ()
-  (ignore-errors
-    (car (process-lines "git" "rev-parse" "--show-toplevel"))))
-
-(defun e-git-prompt--git-branch-name ()
-  (ignore-errors
-    (car (process-lines "git" "rev-parse" "--abbrev-ref" "HEAD"))))
-
-(defun my/eshell-git-info ()
-  "Ritorna stringa con repo, percorso relativo e branch."
-  (let* ((pwd (eshell/pwd))
-         (root (e-git-prompt--git-root-dir)))
-    (when root
-      (let* ((rel (file-relative-name pwd root))
-             (repo (file-name-nondirectory root))
-             (branch (e-git-prompt--git-branch-name))
-             (icon (propertize "\xf020 " 'face `(:family "octicons"))))
-        (concat
-         (propertize repo 'face '(:foreground "#F3F99D"))
-         (when (not (string= rel "./"))
-           (concat ":" (propertize rel 'face '(:foreground "#5AF78E"))))
-         " " icon " "
-         (propertize branch 'face '(:foreground "#FFB86C")))))))
-
-(defun my/eshell-prompt ()
-  (let ((user (user-login-name))
-        (host (system-name))
-        (path (abbreviate-file-name (eshell/pwd)))
-        (symbol (if (= (user-uid) 0)
-                    (propertize "#" 'face '(:foreground "#FF5C57"))
-                  (propertize "$" 'face '(:foreground "#9AEDFE"))))
-        (git (my/eshell-git-info)))
-    (concat "["
-            (propertize user 'face '(:foreground "#57C7FF"))
-            "@"
-            (propertize host 'face '(:foreground "#FF6AC1"))
-            " "
-            (if git git
-              (propertize path 'face '(:foreground "#5AF78E")))
-            "]"
-            "\n"
-            symbol
-            " ")))
-
-(use-package eshell
-  :ensure nil
-  :hook (eshell-mode . display-line-numbers-mode)
-  :config
-  (setq eshell-prompt-regexp "^[^#$\n]*[#$] "
-        eshell-prompt-function #'my/eshell-prompt
-        eshell-highlight-prompt nil
-        eshell-hist-ignoredups t
-        eshell-visual-commands '("htop" "less" "more" "man" "top" "ssh"))
-  :bind ("C-c RET" . eshell))
-
-;; Dipendenze di sistema (Arch) per compilare il modulo di vterm:
-;;   sudo pacman -S cmake libtool
-
-;;; ===========================================================================
-;;; VTERM — terminale vero (libvterm), per tutto ciò che è interattivo
-;;; ===========================================================================
-
-(use-package vterm
-  :ensure t
-  :commands vterm
-  :bind (:map vterm-mode-map
-              ;; C-q manda il tasto successivo al terminale così com'è
-              ("C-q" . vterm-send-next-key))
-  :custom
-  (vterm-max-scrollback 10000)
-  (vterm-kill-buffer-on-exit t)
-  ;; Nome del buffer = titolo impostato dalla shell (es. directory corrente)
-  (vterm-buffer-name-string "vterm: %s")
-  ;; Compila il modulo nativo senza chiedere al primo avvio
-  (vterm-always-compile-module t)
-  :hook
-  (vterm-mode . (lambda ()
-                  ;; Niente numeri di riga né hl-line dentro il terminale
-                  (display-line-numbers-mode -1)
-                  (hl-line-mode -1)
-                  (setq-local global-hl-line-mode nil))))
-
-;; Terminale "a scomparsa" in basso: stesso tasto per aprirlo e nasconderlo
-(use-package vterm-toggle
-  :ensure t
-  :bind (("C-c t" . vterm-toggle)
-         ("C-c T" . vterm-toggle-cd))
-  :custom
-  (vterm-toggle-fullscreen-p nil)
-  (vterm-toggle-scope 'project)
-  :config
-  (add-to-list 'display-buffer-alist
-               '("\\`\\*?vterm"
-                 (display-buffer-reuse-window display-buffer-in-side-window)
-                 (side . bottom)
-                 (slot . 0)
-                 (window-height . 0.3)
-                 (reusable-frames . visible))))
-
-;; Per far seguire a Emacs la directory corrente della shell (find-file,
-;; magit-status ecc. aprono nella dir giusta), aggiungi al tuo ~/.bashrc
-;; o ~/.zshrc:
-;;
-;;   vterm_printf() {
-;;     if [ -n "$TMUX" ]; then
-;;       printf "\ePtmux;\e\e]%s\007\e\\" "$1"
-;;     else
-;;       printf "\e]%s\e\\" "$1"
-;;     fi
-;;   }
-;;   vterm_prompt_end() {
-;;     vterm_printf "51;A$(whoami)@$(hostname):$(pwd)"
-;;   }
-;;   if [[ "$INSIDE_EMACS" = 'vterm' ]]; then
-;;     # bash:
-;;     PS1=$PS1'\[$(vterm_prompt_end)\]'
-;;     # zsh (usa questa riga al posto di quella sopra):
-;;     # setopt PROMPT_SUBST; PROMPT=$PROMPT'%{$(vterm_prompt_end)%}'
-;;   fi
-
 ;;; ===========================================================================
 ;;; ESHELL — shell scritta in Elisp, integrata col resto di Emacs
 ;;; ===========================================================================
@@ -1900,6 +1855,71 @@ Serve da limite alle regole che valgono solo dentro i tag Twig."
   :custom
   (eat-kill-buffer-on-exit t))
 
+;; Dipendenze di sistema (Arch) per compilare il modulo di vterm:
+;;   sudo pacman -S cmake libtool
+
+;;; ===========================================================================
+;;; VTERM — terminale vero (libvterm), per tutto ciò che è interattivo
+;;; ===========================================================================
+
+(use-package vterm
+  :ensure t
+  :commands vterm
+  :bind (:map vterm-mode-map
+              ;; C-q manda il tasto successivo al terminale così com'è
+              ("C-q" . vterm-send-next-key))
+  :custom
+  (vterm-max-scrollback 10000)
+  (vterm-kill-buffer-on-exit t)
+  ;; Nome del buffer = titolo impostato dalla shell (es. directory corrente)
+  (vterm-buffer-name-string "vterm: %s")
+  ;; Compila il modulo nativo senza chiedere al primo avvio
+  (vterm-always-compile-module t)
+  :hook
+  (vterm-mode . (lambda ()
+                  ;; Niente numeri di riga né hl-line dentro il terminale
+                  (display-line-numbers-mode -1)
+                  (hl-line-mode -1)
+                  (setq-local global-hl-line-mode nil))))
+
+;; Terminale "a scomparsa" in basso: stesso tasto per aprirlo e nasconderlo
+(use-package vterm-toggle
+  :ensure t
+  :bind (("C-c t" . vterm-toggle)
+         ("C-c T" . vterm-toggle-cd))
+  :custom
+  (vterm-toggle-fullscreen-p nil)
+  (vterm-toggle-scope 'project)
+  :config
+  (add-to-list 'display-buffer-alist
+               '("\\`\\*?vterm"
+                 (display-buffer-reuse-window display-buffer-in-side-window)
+                 (side . bottom)
+                 (slot . 0)
+                 (window-height . 0.3)
+                 (reusable-frames . visible))))
+
+;; Per far seguire a Emacs la directory corrente della shell (find-file,
+;; magit-status ecc. aprono nella dir giusta), aggiungi al tuo ~/.bashrc
+;; o ~/.zshrc:
+;;
+;;   vterm_printf() {
+;;     if [ -n "$TMUX" ]; then
+;;       printf "\ePtmux;\e\e]%s\007\e\\" "$1"
+;;     else
+;;       printf "\e]%s\e\\" "$1"
+;;     fi
+;;   }
+;;   vterm_prompt_end() {
+;;     vterm_printf "51;A$(whoami)@$(hostname):$(pwd)"
+;;   }
+;;   if [[ "$INSIDE_EMACS" = 'vterm' ]]; then
+;;     # bash:
+;;     PS1=$PS1'\[$(vterm_prompt_end)\]'
+;;     # zsh (usa questa riga al posto di quella sopra):
+;;     # setopt PROMPT_SUBST; PROMPT=$PROMPT'%{$(vterm_prompt_end)%}'
+;;   fi
+
 (use-package terminal-here
   :config
   (setq terminal-here-linux-terminal-command 'terminator))
@@ -1953,15 +1973,14 @@ sullo schermo dove stai lavorando."
     (setq this-command command)
     (call-interactively command)))
 
-;; (defconst my/exwm-p
-;;   (pcase (getenv "MY_EXWM")
-;;     ("1" t)
-;;     ("0" nil)
-;;     (_ (and (eq window-system 'x)
-;;             (member (getenv "XDG_CURRENT_DESKTOP") '(nil "" "EXWM"))
-;;             t)))
-;;   "Non-nil se questa sessione deve usare EXWM come window manager.")
+(defconst my/exwm-p
+  (and (eq window-system 'x)
+       (or (equal (getenv "MY_EXWM") "1")
+           (member "LXDE" (split-string (or (getenv "XDG_CURRENT_DESKTOP") "") ":")))
+       (not (x-window-property "_NET_SUPPORTING_WM_CHECK" nil "WINDOW" 0 nil t)))
+  "Non-nil se questa sessione deve usare EXWM come window manager.")
 
+;;(when my/exwm-p
 (use-package xdg-launcher
   :vc (:url "https://github.com/emacs-exwm/xdg-launcher" :rev :newest)
   :demand t
@@ -2029,7 +2048,7 @@ sullo schermo dove stai lavorando."
   (setq exwm-manage-configurations
         '(((member exwm-class-name '("Terminator" "Brave-browser" "Nyxt" "st-256color"))
            char-mode t))))
-                                        ;)   ; chiude anche il when
+;;)  ; chiude anche il when
 
 (use-package peek
   :disabled
