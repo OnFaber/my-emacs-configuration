@@ -639,6 +639,11 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
   (corfu-popupinfo-mode)   ; documentazione accanto al candidato
   (corfu-history-mode))    ; ordina per uso recente (con savehist che hai già)
 
+;; REPL del debugger e shell: niente popup automatico,
+;; il completamento resta disponibile con TAB / C-M-i
+(dolist (hook '(dape-repl-mode-hook eshell-mode-hook shell-mode-hook))
+  (add-hook hook (lambda () (setq-local corfu-auto nil))))
+
 (use-package nerd-icons-corfu
   :after corfu
   :config (add-to-list 'corfu-margin-formatters #'nerd-icons-corfu-formatter))
@@ -1359,9 +1364,42 @@ LSP-mode è usato solo per Java, Python e Vue.
 =M-x dape= e scegli =netcoredbg=. Breakpoint con =M-x dape-breakpoint-toggle=.
 
 #+begin_src emacs-lisp
+;;; --- Debug .NET con dape + netcoredbg ---------------------------------------
+;; M-x dape RET netcoredbg-progetto  (compila, poi avvia sotto debugger)
+
+(defun my/dotnet-progetto ()
+  "Cartella che contiene il .csproj del file corrente."
+  (or (locate-dominating-file
+       default-directory
+       (lambda (dir) (directory-files dir nil "\\.csproj\\'")))
+      (user-error "Nessun .csproj sopra questa cartella")))
+
+(defun my/dotnet-dll ()
+  "La DLL del progetto: bin/Debug/<framework>/<NomeProgetto>.dll."
+  (let* ((root (my/dotnet-progetto))
+         (nome (file-name-base (car (directory-files root nil "\\.csproj\\'"))))
+         (dll (car (file-expand-wildcards
+                    (expand-file-name (format "bin/Debug/*/%s.dll" nome) root)))))
+    (or dll (user-error "DLL non trovata: il progetto si chiama %s?" nome))))
+
 (use-package dape
   :custom
-  (dape-buffer-window-arrangement 'right))
+  (dape-buffer-window-arrangement 'right)
+  (dape-inlay-hints t)                       ; valori delle variabili accanto al codice
+  :config
+  (add-to-list 'dape-configs
+               '(netcoredbg-progetto
+                 modes (csharp-mode csharp-ts-mode)
+                 ensure dape-ensure-command
+                 command "netcoredbg"
+                 command-args ["--interpreter=vscode"]
+                 command-cwd my/dotnet-progetto
+                 compile "dotnet build"      ; compila prima di ogni avvio
+                 :request "launch"
+                 :cwd my/dotnet-progetto
+                 :program my/dotnet-dll
+                 :args []
+                 :stopAtEntry nil)))
 #+end_src
 
 ** Eglot Java (JDT LS)
