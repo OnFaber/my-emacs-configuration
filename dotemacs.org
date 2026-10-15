@@ -401,6 +401,107 @@ Gestisce anche i separatori tra le finestre.
   (spacious-padding-mode 1))
 #+end_src
 
+Due livelli di tab:
+- =tab-bar= (in cima al frame): contesti di lavoro, uno per progetto.
+  Una nuova tab copia il layout: treemacs, debugger e split restano.
+  =s-t= nuova, =s-w= chiudi, =s-{= / =s-}= precedente/successiva.
+- =tab-line= (sopra la finestra del codice): i file aperti in quella
+  finestra. Cambiare tab cambia solo il buffer, il resto dello schermo
+  non si tocca. =C-<tab>= / =C-S-<tab>= per scorrerle.
+
+
+#+begin_src emacs-lisp
+;;; --- tab-bar: contesti di lavoro --------------------------------------------
+
+(defun my/tab-bar-nome ()
+  "Nome della tab: il progetto della finestra attiva, o il nome del buffer."
+  (let ((buf (window-buffer (minibuffer-selected-window))))
+    (with-current-buffer buf
+      (if-let* ((pr (project-current)))
+          (project-name pr)
+        (buffer-name buf)))))
+
+(use-package tab-bar
+  :ensure nil
+  :custom
+  (tab-bar-new-tab-choice 'clone)          ; la nuova tab copia il layout
+  (tab-bar-new-tab-to 'rightmost)
+  (tab-bar-show 1)                         ; barra visibile solo con 2+ tab
+  (tab-bar-close-button-show nil)
+  (tab-bar-new-button-show nil)
+  (tab-bar-tab-hints t)                    ; numero davanti al nome
+  (tab-bar-tab-name-function #'my/tab-bar-nome)
+  (tab-bar-separator "  ")
+  :custom-face
+  (tab-bar              ((t (:inherit mode-line-inactive :box nil))))
+  (tab-bar-tab          ((t (:inherit mode-line :weight bold :box nil))))
+  (tab-bar-tab-inactive ((t (:inherit mode-line-inactive :box nil))))
+  :config
+  ;; C-c ← / C-c → annullano e ripristinano i cambi di layout della tab
+  (tab-bar-history-mode 1)
+  ;; C-<tab> e C-S-<tab> servono a tab-line; per le tab-bar restano s-{ e s-}
+  (dolist (tasto '("C-<tab>" "C-S-<tab>" "C-S-<iso-lefttab>"))
+    (keymap-unset tab-bar-mode-map tasto t)))
+
+;;; --- tab-line: i file nella finestra del codice -----------------------------
+
+(defvar-local my/tab-line--root 'da-calcolare
+  "Radice del progetto del buffer, calcolata una volta sola.")
+
+(defun my/tab-line--root (buf)
+  "Radice del progetto di BUF, o nil se non è in un progetto."
+  (with-current-buffer buf
+    (when (eq my/tab-line--root 'da-calcolare)
+      (setq my/tab-line--root
+            (when-let* ((pr (project-current)))
+              (expand-file-name (project-root pr)))))
+    my/tab-line--root))
+
+(defun my/tab-line-tabs ()
+  "Tab: i file di codice e testo aperti nello stesso progetto, in ordine alfabetico."
+  (let ((root (my/tab-line--root (current-buffer))))
+    (sort (seq-filter
+           (lambda (b)
+             (and (buffer-file-name b)
+                  (with-current-buffer b (derived-mode-p 'prog-mode 'text-mode))
+                  (equal (my/tab-line--root b) root)))
+           (buffer-list))
+          (lambda (a b) (string< (buffer-name a) (buffer-name b))))))
+
+(defun my/tab-line-nome (buffer &optional _buffers)
+  "Nome della tab: icona del tipo di file più nome del buffer."
+  (concat " "
+          (with-current-buffer buffer
+            (if (fboundp 'nerd-icons-icon-for-buffer)
+                (nerd-icons-icon-for-buffer)
+              ""))
+          " " (buffer-name buffer) " "))
+
+(use-package tab-line
+  :ensure nil
+  :hook ((prog-mode text-mode) . tab-line-mode)   ; niente tab in treemacs, dape, popup
+  :bind (("C-<tab>"           . tab-line-switch-to-next-tab)
+         ("C-S-<iso-lefttab>" . tab-line-switch-to-prev-tab))
+  :custom
+  (tab-line-tabs-function #'my/tab-line-tabs)
+  (tab-line-tab-name-function #'my/tab-line-nome)
+  (tab-line-close-tab-function #'kill-buffer)     ; la x chiude davvero il buffer
+  (tab-line-close-button-show 'selected)          ; x solo sulla tab attiva
+  (tab-line-new-button-show nil)
+  (tab-line-separator "")
+  (tab-line-switch-cycling t)                     ; dall'ultima torna alla prima
+  ;; tab dei file modificati e non salvati in evidenza
+  (tab-line-tab-face-functions '(tab-line-tab-face-modified
+                                 tab-line-tab-face-special))
+  :custom-face
+  (tab-line              ((t (:inherit mode-line-inactive :box nil))))
+  (tab-line-tab          ((t (:inherit tab-line))))
+  (tab-line-tab-inactive ((t (:inherit tab-line))))
+  (tab-line-tab-current  ((t (:inherit default :weight bold :box nil))))
+  (tab-line-highlight    ((t (:inherit highlight :box nil)))))
+
+#+end_src
+
 ** Popup (da Doom)
 
 I buffer di servizio compaiono in basso e si chiudono con un tasto.
@@ -512,6 +613,7 @@ All'avvio: file recenti, progetti e agenda.
 #+begin_src emacs-lisp
 ;; C-x u apre l'albero delle modifiche sotto al buffer
 (use-package vundo
+  :disabled
   :bind ("C-x u" . vundo)
   :custom
   (vundo-glyph-alist vundo-unicode-symbols)   ; ●──○ invece di o--x
@@ -529,11 +631,26 @@ All'avvio: file recenti, progetti e agenda.
 
 ;; La cronologia sopravvive anche alla chiusura del file e al riavvio
 (use-package undo-fu-session
+  :disabled
   :custom
   (undo-fu-session-directory (expand-file-name "undo-fu-session/" my/cache-directory))
   (undo-fu-session-incompatible-files '("\\.gpg\\'" "/COMMIT_EDITMSG\\'" "/git-rebase-todo\\'"))
   :config
   (undo-fu-session-global-mode 1))
+#+end_src
+
+** Undo tree
+
+#+begin_src emacs-lisp
+(use-package undo-tree
+  :custom
+  (undo-tree-visualizer-diff t)            ; mostra il diff di ogni passo
+  (undo-tree-visualizer-timestamps t)      ; orario accanto ai nodi
+  (undo-tree-auto-save-history t)          ; la cronologia sopravvive al riavvio
+  (undo-tree-history-directory-alist
+   `(("." . ,(expand-file-name "undo-tree/" my/cache-directory))))
+  :config
+  (global-undo-tree-mode 1))
 #+end_src
 
 * Completamento e Navigazione
