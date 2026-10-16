@@ -259,6 +259,17 @@ Le variabili vengono lette da una shell di login: vanno definite in
 Snazzy da doom-themes:  Per provare altri temi al volo: =C-c t= (=consult-theme=).
 
 #+begin_src emacs-lisp
+(defun mio/bordo-header-line (&rest _)
+  "Bordo della header line con un colore fisso.
+Senza colore esplicito, :underline e :overline prendono il colore
+del testo, e il bordo cambia colore a ogni segmento."
+  (let ((colore (face-foreground 'shadow nil t)))   ; grigio coerente con il tema attivo
+    (set-face-attribute 'header-line nil
+                        :underline `(:color ,colore :position t)
+                        :overline colore)))
+#+end_src
+
+#+begin_src emacs-lisp
 (use-package doom-themes
   :disabled
   :custom
@@ -290,6 +301,11 @@ Snazzy da doom-themes:  Per provare altri temi al volo: =C-c t= (=consult-theme=
 (use-package spacemacs-theme
   :config
   (load-theme 'spacemacs-dark :no-confirm))
+#+end_src
+
+#+begin_src emacs-lisp
+(add-hook 'enable-theme-functions #'mio/bordo-header-line)   ; a ogni cambio di tema
+(mio/bordo-header-line)                                       ; e subito, per il tema già caricato
 #+end_src
 
 ** Font
@@ -336,6 +352,31 @@ Al primo avvio: =M-x nerd-icons-install-fonts=.
 ** Modeline
 
 #+begin_src emacs-lisp
+(defun my/modeline-colori (&rest _)
+  "Mode line ben distinguibile dal buffer sotto.
+Sfondo più chiaro (o più scuro) del tema, più una sottile linea sopra
+per separarla dalla finestra in basso."
+  (require 'color)
+  (let* ((sfondo (face-background 'default nil t))
+         (scuro  (eq (frame-parameter nil 'background-mode) 'dark))
+         (varia  (lambda (p) (if scuro (color-lighten-name sfondo p)
+                               (color-darken-name sfondo p))))
+         (linea  (face-foreground 'shadow nil t)))
+    (when (and sfondo (color-defined-p sfondo))
+      (dolist (face '(mode-line mode-line-active))      ; mode-line-active esiste da Emacs 29
+        (when (facep face)
+          (set-face-attribute face nil
+                              :background (funcall varia 2)
+                              :overline linea
+                              :box nil)))
+      (set-face-attribute 'mode-line-inactive nil
+                          :background (funcall varia 5)
+                          :overline linea
+                          :box nil))))
+
+(add-hook 'enable-theme-functions #'my/modeline-colori)
+(my/modeline-colori)
+
 (use-package doom-modeline
   :init (doom-modeline-mode 1)
   :config
@@ -611,38 +652,49 @@ All'avvio: file recenti, progetti e agenda.
 ** Vundo
 
 #+begin_src emacs-lisp
-;; C-x u apre l'albero delle modifiche sotto al buffer
 (use-package vundo
-  :disabled
   :bind ("C-x u" . vundo)
   :custom
-  (vundo-glyph-alist vundo-unicode-symbols)   ; ●──○ invece di o--x
-  (vundo-compact-display t)                   ; albero più stretto
+  (vundo-glyph-alist vundo-unicode-symbols)
+  (vundo-compact-display t)
   (vundo-window-max-height 8)
   :config
   ;; i simboli dell'albero vanno allineati: sempre font monospazio
-  (set-face-attribute 'vundo-default nil :family (face-attribute 'fixed-pitch :family)))
+  (set-face-attribute 'vundo-default nil :family (face-attribute 'fixed-pitch :family))
 
-;; Più memoria per gli undo (valori di Doom): la cronologia non viene
-;; tagliata dopo poche centinaia di modifiche
-(setq undo-limit        (* 64 1024 1024)
-      undo-strong-limit (* 96 1024 1024)
-      undo-outer-limit  (* 960 1024 1024))
+  ;; Colori presi dal tema invece di quelli fissi del pacchetto
+  (set-face-attribute 'vundo-stem nil :inherit '(shadow vundo-default))            ; rami: tenui
+  (set-face-attribute 'vundo-highlight nil :foreground 'unspecified
+                      :inherit '(warning vundo-node) :weight 'bold)                ; dove sei
+  (set-face-attribute 'vundo-saved nil :foreground 'unspecified
+                      :inherit '(success vundo-node))                              ; stati salvati
+  (set-face-attribute 'vundo-last-saved nil :inherit 'vundo-saved :weight 'bold)
 
-;; La cronologia sopravvive anche alla chiusura del file e al riavvio
-(use-package undo-fu-session
-  :disabled
-  :custom
-  (undo-fu-session-directory (expand-file-name "undo-fu-session/" my/cache-directory))
-  (undo-fu-session-incompatible-files '("\\.gpg\\'" "/COMMIT_EDITMSG\\'" "/git-rebase-todo\\'"))
-  :config
-  (undo-fu-session-global-mode 1))
+  ;; Sfondo leggermente diverso, come peek: la finestra si stacca dal codice
+  (defun my/vundo-sfondo (&rest _)
+    (require 'color)
+    (let ((sfondo (face-background 'default nil t)))
+      (when (and sfondo (color-defined-p sfondo))
+        (set-face-attribute 'vundo-default nil
+                            :background (if (eq (frame-parameter nil 'background-mode) 'dark)
+                                            (color-lighten-name sfondo 5)
+                                          (color-darken-name sfondo 3))))))
+  (add-hook 'enable-theme-functions #'my/vundo-sfondo)
+  (my/vundo-sfondo)
+
+  ;; Promemoria dei tasti in cima alla finestra
+  (add-hook 'vundo-mode-hook
+            (lambda ()
+              (setq header-line-format
+                    (propertize " ←/→ indietro/avanti   ↑/↓ cambia ramo   l ultimo salvataggio   d diff   RET conferma   q annulla"
+                                'face 'shadow)))))
 #+end_src
 
 ** Undo tree
 
 #+begin_src emacs-lisp
 (use-package undo-tree
+  :disabled
   :custom
   (undo-tree-visualizer-diff t)            ; mostra il diff di ogni passo
   (undo-tree-visualizer-timestamps t)      ; orario accanto ai nodi
@@ -651,6 +703,109 @@ All'avvio: file recenti, progetti e agenda.
    `(("." . ,(expand-file-name "undo-tree/" my/cache-directory))))
   :config
   (global-undo-tree-mode 1))
+#+end_src
+
+** Minimap
+
+#+begin_src emacs-lisp
+(defun my/minimap-colori (&rest _)
+  "Colori della minimap ricavati dal tema."
+  (require 'color)
+  (let ((sfondo (face-background 'default nil t))
+        (testo  (face-foreground 'default nil t)))
+    (when (and sfondo (color-defined-p sfondo))
+      (let ((scuro (eq (frame-parameter nil 'background-mode) 'dark)))
+        ;; fascia della parte visibile (era il rosso #700000)
+        (set-face-attribute 'minimap-active-region-background nil
+                            :background (if scuro (color-lighten-name sfondo 12)
+                                          (color-darken-name sfondo 8)))
+        ;; riga corrente: il pacchetto usa anche il :foreground di questa face
+        ;; e, se manca, genera "Invalid face attribute :foreground nil"
+        (set-face-attribute 'minimap-current-line-face nil
+                            :background (if scuro (color-lighten-name sfondo 25)
+                                          (color-darken-name sfondo 15))
+                            :foreground testo)))))
+
+(defun my/minimap-fuori-posto-p ()
+  "Vero se la minimap non è più accanto alla finestra del codice."
+  (when-let* ((mm (minimap-get-window))
+              ((buffer-live-p minimap-active-buffer))
+              (src (get-buffer-window minimap-active-buffer)))
+    (not (eq (window-in-direction
+              (if (eq minimap-window-location 'left) 'right 'left) mm)
+             src))))
+
+(defun my/minimap-riaggancia ()
+  "Se la minimap si è staccata dal codice, la ricrea subito accanto al codice."
+  (when (and (bound-and-true-p minimap-mode)
+             (not (active-minibuffer-window))
+             (my/minimap-fuori-posto-p))
+    (let ((src (get-buffer-window minimap-active-buffer)))
+      (delete-window (minimap-get-window))
+      ;; la crea dividendo la finestra del CODICE, non quella selezionata
+      (let ((mm (with-selected-window src (minimap-create-window))))
+        (with-selected-window mm
+          (set-window-dedicated-p nil nil)
+          (switch-to-buffer minimap-buffer-name t t)
+          (when minimap-hide-fringes (set-window-fringes nil 0 0))
+          (when minimap-dedicated-window (set-window-dedicated-p nil t))))
+      ;; e la sincronizza con la posizione nel codice
+      (with-selected-window src (minimap-update t)))))
+
+(add-hook 'window-configuration-change-hook
+          (lambda () (run-with-timer 0 nil #'my/minimap-riaggancia)))
+
+(defvar my/minimap-frazione 0.08
+  "Larghezza della minimap come frazione del FRAME, non della finestra del codice.")
+(defvar my/minimap-larghezza-minima 12)
+
+(defun my/minimap-larghezza ()
+  (max my/minimap-larghezza-minima
+       (round (* (frame-width) my/minimap-frazione))))
+
+(defun my/minimap-larghezza-dal-frame (orig &rest args)
+  "Crea la minimap con una larghezza calcolata sul frame, qualunque sia lo split."
+  (let ((minimap-width-fraction 0)                         ; annulla il calcolo sulla finestra…
+        (minimap-minimum-width (my/minimap-larghezza)))    ; …così vince sempre il "minimo"
+    (apply orig args)))
+(advice-add 'minimap-create-window :around #'my/minimap-larghezza-dal-frame)
+
+   (defun my/senza-minimap (orig &rest args)
+     "Esegue ORIG con la minimap spenta, poi la riaccende se era attiva."
+     (let ((era-attiva (bound-and-true-p minimap-mode)))
+       (when era-attiva (minimap-mode -1))
+       (unwind-protect (apply orig args)
+         (when era-attiva (minimap-mode 1)))))
+   (advice-add 'org-babel-tangle :around #'my/senza-minimap)
+
+(with-eval-after-load 'doom-modeline
+  ;; mode line doom vuota: solo il segmento 'bar, che le dà l'altezza giusta
+  (doom-modeline-def-modeline 'minimap '(bar) '()))
+
+(add-hook 'minimap-sb-mode-hook
+          (lambda ()
+            (setq-local window-size-fixed 'width)
+            (setq-local fringe-indicator-alist (cons '(truncation nil nil) fringe-indicator-alist))
+            (if (fboundp 'doom-modeline-set-modeline)
+                (doom-modeline-set-modeline 'minimap)    ; stessa altezza e stile di doom
+              (setq-local mode-line-format ""))          ; ripiego se doom non c'è
+            (face-remap-add-relative 'mode-line-inactive 'mode-line-active)))
+
+(use-package minimap
+  :disabled
+  :hook (prog-mode . (lambda () (minimap-mode 1)))
+  :custom
+  (minimap-major-modes '(prog-mode))
+  (minimap-window-location 'right)
+  (minimap-disable-mode-line nil)
+  (minimap-hide-fringes t)
+  (minimap-minimum-width 15)
+  (minimap-update-delay 0.2)
+  :bind ("C-x M" . minimap-mode)
+  :config
+  (add-hook 'enable-theme-functions #'my/minimap-colori)
+  (my/minimap-colori))
+
 #+end_src
 
 * Completamento e Navigazione
@@ -716,6 +871,34 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
 #+end_src
 
 ** Corfu
+
+#+begin_src emacs-lisp
+(defun my/corfu-popupinfo-show-exwm (orig &rest args)
+  "Applica l'offset del monitor anche alla finestra della documentazione."
+  (let ((my/corfu--in-popup t))
+    (apply orig args)))
+
+(defun my/corfu-popupinfo-areas-exwm (orig ps)
+  "Calcola le aree di popupinfo con la geometria SENZA l'offset del monitor.
+Altrimenti la x gonfiata fa sembrare che a destra non ci sia spazio,
+e la doc finisce a sinistra, sull'altro schermo."
+  (if-let* ((off (my/posframe-refposhandler-exwm))
+            (geo (frame-parameter corfu--frame 'corfu--geometry)))
+      (pcase-let ((`(,x ,y . ,rest) geo))
+        (unwind-protect
+            (progn
+              (set-frame-parameter corfu--frame 'corfu--geometry
+                                   `(,(- x (car off))
+                                     ,(- y (cdr off) my/corfu-exwm-y-adjust)
+                                     ,@rest))
+              (funcall orig ps))
+          (set-frame-parameter corfu--frame 'corfu--geometry geo)))   ; ripristina sempre
+    (funcall orig ps)))
+
+(with-eval-after-load 'corfu-popupinfo
+  (advice-add 'corfu-popupinfo--show :around #'my/corfu-popupinfo-show-exwm)
+  (advice-add 'corfu-popupinfo--possible-areas :around #'my/corfu-popupinfo-areas-exwm))
+#+end_src
 
 #+begin_src emacs-lisp
 (defvar my/corfu-exwm-y-adjust 25
@@ -1226,7 +1409,6 @@ Il completamento parte da solo dopo 1 carattere: niente tasto manuale
 #+begin_src emacs-lisp
 
 (use-package error-line-highlight
-  :disabled
   :ensure nil
   :hook (prog-mode . error-line-highlight-mode))
 
@@ -2989,10 +3171,11 @@ nell'ambiente; per spegnerlo: =MY_EXWM=0=.
 * Peek
 
 #+begin_src emacs-lisp
+;; peek.el patchato: run-with-timer con repeat t → errore (Emacs ≥ 30), vedi riga 678
 (use-package peek
-  :disabled
   :ensure nil
   :load-path (lambda () (expand-file-name "peek/" my/libs-directory))
+  :demand t   ; caricato da load-path: gli autoload non sono registrati
   :custom
   (peek-overlay-window-size 11)
   (peek-overlay-border-character ?\N{BOX DRAWINGS LIGHT HORIZONTAL})
@@ -3002,14 +3185,26 @@ nell'ambiente; per spegnerlo: =MY_EXWM=0=.
   (peek-enable-eldoc-message-integration t)
   (peek-eldoc-message-overlay-position 2)
   (peek-enable-eldoc-display-integration t)
+:bind (("C-x P p" . peek-overlay-dwim)
+       ("C-x P d" . peek-xref-definition)
+       ("C-x P e" . eldoc)
+       ("C-x P m" . peek-overlay-eldoc-message-toggle-stauts))   ; sì, "stauts" è il nome vero
   :config
-  (define-key peek-mode-keymap (kbd "M-n") 'peek-next-line)
-  (define-key peek-mode-keymap (kbd "M-p") 'peek-prev-line)
-  (global-set-key (kbd "C-x P p") #'peek-overlay-dwim)
-  (global-set-key (kbd "C-x P d") #'peek-xref-definition)
-  (global-set-key (kbd "C-x P e") #'eldoc)    ; C-c c è org-capture
-  (remove-hook 'eldoc-display-functions 'eldoc-display-in-buffer)
-  (setq-default scroll-margin 5))
+  (defun mio/peek-sfondo (&rest _)
+    "Sfondo discreto per il contenuto di peek, ricavato dal tema attivo.
+Il default del pacchetto (#95a5a6 sui temi scuri) è troppo acceso."
+    (require 'color)
+    (let ((sfondo (face-background 'default nil t)))
+      (when (and sfondo (color-defined-p sfondo))
+        (set-face-attribute 'peek-overlay-content-face nil
+                            :background (if (eq (frame-parameter nil 'background-mode) 'dark)
+                                            (color-lighten-name sfondo 6)
+                                          (color-darken-name sfondo 4))))))
+  (add-hook 'enable-theme-functions #'mio/peek-sfondo)
+  (mio/peek-sfondo)
+  ;; le doc di eldoc vanno nella vista peek invece che nel buffer *eldoc*
+  (remove-hook 'eldoc-display-functions #'eldoc-display-in-buffer)
+  (global-peek-mode 1))
 #+end_src
 
 * Tramp
