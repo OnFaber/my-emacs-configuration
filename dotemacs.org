@@ -319,6 +319,35 @@ Se un font manca si passa al successivo della lista.
   "La prima delle FAMIGLIE di font installata, o nil."
   (seq-find (lambda (f) (find-font (font-spec :family f))) famiglie))
 
+;;; UI: colori discreti e coerenti con il tema attivo.
+(require 'color)
+
+(defun my/ui-apply-editor-faces (&rest _)
+  "Armonizza riga corrente e numeri di riga con il tema attivo."
+  (let* ((bg (face-background 'default nil t))
+         (dark (eq (frame-parameter nil 'background-mode) 'dark))
+         (subtle-bg
+          (when (and bg (color-defined-p bg))
+            (if dark
+                (color-lighten-name bg 3)
+              (color-darken-name bg 3)))))
+    ;; Riga corrente: un leggero contrasto, non una fascia vistosa.
+    (when subtle-bg
+      (set-face-attribute 'hl-line nil
+                          :background subtle-bg
+                          :extend t))
+    ;; Numeri di riga meno evidenti del codice.
+    (when (facep 'line-number)
+      (set-face-attribute 'line-number nil
+                          :inherit 'shadow
+                          :weight 'regular))
+    (when (facep 'line-number-current-line)
+      (set-face-attribute 'line-number-current-line nil
+                          :inherit 'default
+                          :weight 'bold))))
+
+(add-hook 'enable-theme-functions #'my/ui-apply-editor-faces)
+(add-hook 'after-init-hook #'my/ui-apply-editor-faces)
 (when-let* ((mono (my/primo-font "Inconsolata" "JetBrains Mono" "DejaVu Sans Mono")))
   (set-face-attribute 'default nil :family mono :height 90 :weight 'regular)
   (set-face-attribute 'fixed-pitch nil :family mono))
