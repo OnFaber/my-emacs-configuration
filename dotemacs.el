@@ -93,6 +93,15 @@
   :config
   (electric-pair-mode 1))
 
+(defun mio/bordo-header-line (&rest _)
+  "Bordo della header line con un colore fisso.
+Senza colore esplicito, :underline e :overline prendono il colore
+del testo, e il bordo cambia colore a ogni segmento."
+  (let ((colore (face-foreground 'shadow nil t)))   ; grigio coerente con il tema attivo
+    (set-face-attribute 'header-line nil
+                        :underline `(:color ,colore :position t)
+                        :overline colore)))
+
 (use-package doom-themes
   :disabled
   :custom
@@ -125,6 +134,9 @@
   :config
   (load-theme 'spacemacs-dark :no-confirm))
 
+(add-hook 'enable-theme-functions #'mio/bordo-header-line)   ; a ogni cambio di tema
+(mio/bordo-header-line)                                       ; e subito, per il tema già caricato
+
 (defun my/primo-font (&rest famiglie)
   "La prima delle FAMIGLIE di font installata, o nil."
   (seq-find (lambda (f) (find-font (font-spec :family f))) famiglie))
@@ -149,6 +161,31 @@
   :hook (marginalia-mode . nerd-icons-completion-marginalia-setup)
   :config
   (nerd-icons-completion-mode))
+
+(defun my/modeline-colori (&rest _)
+  "Mode line ben distinguibile dal buffer sotto.
+Sfondo più chiaro (o più scuro) del tema, più una sottile linea sopra
+per separarla dalla finestra in basso."
+  (require 'color)
+  (let* ((sfondo (face-background 'default nil t))
+         (scuro  (eq (frame-parameter nil 'background-mode) 'dark))
+         (varia  (lambda (p) (if scuro (color-lighten-name sfondo p)
+                               (color-darken-name sfondo p))))
+         (linea  (face-foreground 'shadow nil t)))
+    (when (and sfondo (color-defined-p sfondo))
+      (dolist (face '(mode-line mode-line-active))      ; mode-line-active esiste da Emacs 29
+        (when (facep face)
+          (set-face-attribute face nil
+                              :background (funcall varia 2)
+                              :overline linea
+                              :box nil)))
+      (set-face-attribute 'mode-line-inactive nil
+                          :background (funcall varia 5)
+                          :overline linea
+                          :box nil))))
+
+(add-hook 'enable-theme-functions #'my/modeline-colori)
+(my/modeline-colori)
 
 (use-package doom-modeline
   :init (doom-modeline-mode 1)
@@ -194,6 +231,95 @@
                              :fringe-width 8))
   :config
   (spacious-padding-mode 1))
+
+;;; --- tab-bar: contesti di lavoro --------------------------------------------
+
+(defun my/tab-bar-nome ()
+  "Nome della tab: il progetto della finestra attiva, o il nome del buffer."
+  (let ((buf (window-buffer (minibuffer-selected-window))))
+    (with-current-buffer buf
+      (if-let* ((pr (project-current)))
+          (project-name pr)
+        (buffer-name buf)))))
+
+(use-package tab-bar
+  :ensure nil
+  :custom
+  (tab-bar-new-tab-choice 'clone)          ; la nuova tab copia il layout
+  (tab-bar-new-tab-to 'rightmost)
+  (tab-bar-show 1)                         ; barra visibile solo con 2+ tab
+  (tab-bar-close-button-show nil)
+  (tab-bar-new-button-show nil)
+  (tab-bar-tab-hints t)                    ; numero davanti al nome
+  (tab-bar-tab-name-function #'my/tab-bar-nome)
+  (tab-bar-separator "  ")
+  :custom-face
+  (tab-bar              ((t (:inherit mode-line-inactive :box nil))))
+  (tab-bar-tab          ((t (:inherit mode-line :weight bold :box nil))))
+  (tab-bar-tab-inactive ((t (:inherit mode-line-inactive :box nil))))
+  :config
+  ;; C-c ← / C-c → annullano e ripristinano i cambi di layout della tab
+  (tab-bar-history-mode 1)
+  ;; C-<tab> e C-S-<tab> servono a tab-line; per le tab-bar restano s-{ e s-}
+  (dolist (tasto '("C-<tab>" "C-S-<tab>" "C-S-<iso-lefttab>"))
+    (keymap-unset tab-bar-mode-map tasto t)))
+
+;;; --- tab-line: i file nella finestra del codice -----------------------------
+
+(defvar-local my/tab-line--root 'da-calcolare
+  "Radice del progetto del buffer, calcolata una volta sola.")
+
+(defun my/tab-line--root (buf)
+  "Radice del progetto di BUF, o nil se non è in un progetto."
+  (with-current-buffer buf
+    (when (eq my/tab-line--root 'da-calcolare)
+      (setq my/tab-line--root
+            (when-let* ((pr (project-current)))
+              (expand-file-name (project-root pr)))))
+    my/tab-line--root))
+
+(defun my/tab-line-tabs ()
+  "Tab: i file di codice e testo aperti nello stesso progetto, in ordine alfabetico."
+  (let ((root (my/tab-line--root (current-buffer))))
+    (sort (seq-filter
+           (lambda (b)
+             (and (buffer-file-name b)
+                  (with-current-buffer b (derived-mode-p 'prog-mode 'text-mode))
+                  (equal (my/tab-line--root b) root)))
+           (buffer-list))
+          (lambda (a b) (string< (buffer-name a) (buffer-name b))))))
+
+(defun my/tab-line-nome (buffer &optional _buffers)
+  "Nome della tab: icona del tipo di file più nome del buffer."
+  (concat " "
+          (with-current-buffer buffer
+            (if (fboundp 'nerd-icons-icon-for-buffer)
+                (nerd-icons-icon-for-buffer)
+              ""))
+          " " (buffer-name buffer) " "))
+
+(use-package tab-line
+  :ensure nil
+  :hook ((prog-mode text-mode) . tab-line-mode)   ; niente tab in treemacs, dape, popup
+  :bind (("C-<tab>"           . tab-line-switch-to-next-tab)
+         ("C-S-<iso-lefttab>" . tab-line-switch-to-prev-tab))
+  :custom
+  (tab-line-tabs-function #'my/tab-line-tabs)
+  (tab-line-tab-name-function #'my/tab-line-nome)
+  (tab-line-close-tab-function #'kill-buffer)     ; la x chiude davvero il buffer
+  (tab-line-close-button-show 'selected)          ; x solo sulla tab attiva
+  (tab-line-new-button-show nil)
+  (tab-line-separator "")
+  (tab-line-switch-cycling t)                     ; dall'ultima torna alla prima
+  ;; tab dei file modificati e non salvati in evidenza
+  (tab-line-tab-face-functions '(tab-line-tab-face-modified
+                                 tab-line-tab-face-special))
+  :custom-face
+  (tab-line              ((t (:inherit mode-line-inactive :box nil))))
+  (tab-line-tab          ((t (:inherit tab-line))))
+  (tab-line-tab-inactive ((t (:inherit tab-line))))
+  (tab-line-tab-current  ((t (:inherit default :weight bold :box nil))))
+  (tab-line-highlight    ((t (:inherit highlight :box nil)))))
 
 (use-package popper
   :bind (("C-`"   . popper-toggle)        ; mostra/nascondi l'ultimo popup
@@ -302,6 +428,115 @@
   :config
   (undo-fu-session-global-mode 1))
 
+(use-package undo-tree
+  :disabled
+  :custom
+  (undo-tree-visualizer-diff t)            ; mostra il diff di ogni passo
+  (undo-tree-visualizer-timestamps t)      ; orario accanto ai nodi
+  (undo-tree-auto-save-history t)          ; la cronologia sopravvive al riavvio
+  (undo-tree-history-directory-alist
+   `(("." . ,(expand-file-name "undo-tree/" my/cache-directory))))
+  :config
+  (global-undo-tree-mode 1))
+
+(defun my/minimap-colori (&rest _)
+  "Colori della minimap ricavati dal tema."
+  (require 'color)
+  (let ((sfondo (face-background 'default nil t))
+        (testo  (face-foreground 'default nil t)))
+    (when (and sfondo (color-defined-p sfondo))
+      (let ((scuro (eq (frame-parameter nil 'background-mode) 'dark)))
+        ;; fascia della parte visibile (era il rosso #700000)
+        (set-face-attribute 'minimap-active-region-background nil
+                            :background (if scuro (color-lighten-name sfondo 12)
+                                          (color-darken-name sfondo 8)))
+        ;; riga corrente: il pacchetto usa anche il :foreground di questa face
+        ;; e, se manca, genera "Invalid face attribute :foreground nil"
+        (set-face-attribute 'minimap-current-line-face nil
+                            :background (if scuro (color-lighten-name sfondo 25)
+                                          (color-darken-name sfondo 15))
+                            :foreground testo)))))
+
+(defun my/minimap-fuori-posto-p ()
+  "Vero se la minimap non è più accanto alla finestra del codice."
+  (when-let* ((mm (minimap-get-window))
+              ((buffer-live-p minimap-active-buffer))
+              (src (get-buffer-window minimap-active-buffer)))
+    (not (eq (window-in-direction
+              (if (eq minimap-window-location 'left) 'right 'left) mm)
+             src))))
+
+(defun my/minimap-riaggancia ()
+  "Se la minimap si è staccata dal codice, la ricrea subito accanto al codice."
+  (when (and (bound-and-true-p minimap-mode)
+             (not (active-minibuffer-window))
+             (my/minimap-fuori-posto-p))
+    (let ((src (get-buffer-window minimap-active-buffer)))
+      (delete-window (minimap-get-window))
+      ;; la crea dividendo la finestra del CODICE, non quella selezionata
+      (let ((mm (with-selected-window src (minimap-create-window))))
+        (with-selected-window mm
+          (set-window-dedicated-p nil nil)
+          (switch-to-buffer minimap-buffer-name t t)
+          (when minimap-hide-fringes (set-window-fringes nil 0 0))
+          (when minimap-dedicated-window (set-window-dedicated-p nil t))))
+      ;; e la sincronizza con la posizione nel codice
+      (with-selected-window src (minimap-update t)))))
+
+(add-hook 'window-configuration-change-hook
+          (lambda () (run-with-timer 0 nil #'my/minimap-riaggancia)))
+
+(defvar my/minimap-frazione 0.08
+  "Larghezza della minimap come frazione del FRAME, non della finestra del codice.")
+(defvar my/minimap-larghezza-minima 12)
+
+(defun my/minimap-larghezza ()
+  (max my/minimap-larghezza-minima
+       (round (* (frame-width) my/minimap-frazione))))
+
+(defun my/minimap-larghezza-dal-frame (orig &rest args)
+  "Crea la minimap con una larghezza calcolata sul frame, qualunque sia lo split."
+  (let ((minimap-width-fraction 0)                         ; annulla il calcolo sulla finestra…
+        (minimap-minimum-width (my/minimap-larghezza)))    ; …così vince sempre il "minimo"
+    (apply orig args)))
+(advice-add 'minimap-create-window :around #'my/minimap-larghezza-dal-frame)
+
+   (defun my/senza-minimap (orig &rest args)
+     "Esegue ORIG con la minimap spenta, poi la riaccende se era attiva."
+     (let ((era-attiva (bound-and-true-p minimap-mode)))
+       (when era-attiva (minimap-mode -1))
+       (unwind-protect (apply orig args)
+         (when era-attiva (minimap-mode 1)))))
+   (advice-add 'org-babel-tangle :around #'my/senza-minimap)
+
+(with-eval-after-load 'doom-modeline
+  ;; mode line doom vuota: solo il segmento 'bar, che le dà l'altezza giusta
+  (doom-modeline-def-modeline 'minimap '(bar) '()))
+
+(add-hook 'minimap-sb-mode-hook
+          (lambda ()
+            (setq-local window-size-fixed 'width)
+            (setq-local fringe-indicator-alist (cons '(truncation nil nil) fringe-indicator-alist))
+            (if (fboundp 'doom-modeline-set-modeline)
+                (doom-modeline-set-modeline 'minimap)    ; stessa altezza e stile di doom
+              (setq-local mode-line-format ""))          ; ripiego se doom non c'è
+            (face-remap-add-relative 'mode-line-inactive 'mode-line-active)))
+
+(use-package minimap
+  :disabled
+  :hook (prog-mode . (lambda () (minimap-mode 1)))
+  :custom
+  (minimap-major-modes '(prog-mode))
+  (minimap-window-location 'right)
+  (minimap-disable-mode-line nil)
+  (minimap-hide-fringes t)
+  (minimap-minimum-width 15)
+  (minimap-update-delay 0.2)
+  :bind ("C-x M" . minimap-mode)
+  :config
+  (add-hook 'enable-theme-functions #'my/minimap-colori)
+  (my/minimap-colori))
+
 (defun my/posframe-refposhandler-exwm (&optional _frame)
   "Origine (x . y) dello schermo del workspace EXWM attivo.
 Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
@@ -355,6 +590,32 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
 
 (use-package wgrep)
 
+(defun my/corfu-popupinfo-show-exwm (orig &rest args)
+  "Applica l'offset del monitor anche alla finestra della documentazione."
+  (let ((my/corfu--in-popup t))
+    (apply orig args)))
+
+(defun my/corfu-popupinfo-areas-exwm (orig ps)
+  "Calcola le aree di popupinfo con la geometria SENZA l'offset del monitor.
+Altrimenti la x gonfiata fa sembrare che a destra non ci sia spazio,
+e la doc finisce a sinistra, sull'altro schermo."
+  (if-let* ((off (my/posframe-refposhandler-exwm))
+            (geo (frame-parameter corfu--frame 'corfu--geometry)))
+      (pcase-let ((`(,x ,y . ,rest) geo))
+        (unwind-protect
+            (progn
+              (set-frame-parameter corfu--frame 'corfu--geometry
+                                   `(,(- x (car off))
+                                     ,(- y (cdr off) my/corfu-exwm-y-adjust)
+                                     ,@rest))
+              (funcall orig ps))
+          (set-frame-parameter corfu--frame 'corfu--geometry geo)))   ; ripristina sempre
+    (funcall orig ps)))
+
+(with-eval-after-load 'corfu-popupinfo
+  (advice-add 'corfu-popupinfo--show :around #'my/corfu-popupinfo-show-exwm)
+  (advice-add 'corfu-popupinfo--possible-areas :around #'my/corfu-popupinfo-areas-exwm))
+
 (defvar my/corfu-exwm-y-adjust 25
   "Pixel da aggiungere in verticale al popup di corfu sotto EXWM.")
 
@@ -387,6 +648,11 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
   :config
   (corfu-popupinfo-mode)   ; documentazione accanto al candidato
   (corfu-history-mode))    ; ordina per uso recente (con savehist che hai già)
+
+;; REPL del debugger e shell: niente popup automatico,
+;; il completamento resta disponibile con TAB / C-M-i
+(dolist (hook '(dape-repl-mode-hook eshell-mode-hook shell-mode-hook))
+  (add-hook hook (lambda () (setq-local corfu-auto nil))))
 
 (use-package nerd-icons-corfu
   :after corfu
@@ -781,7 +1047,6 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
                     "pkg-config --cflags-only-I gtk+-3.0 | sed 's/-I//g'")))))
 
 (use-package error-line-highlight
-  :disabled
   :ensure nil
   :hook (prog-mode . error-line-highlight-mode))
 
@@ -997,9 +1262,42 @@ Restituisce nil fuori da EXWM: posframe usa allora un frame figlio."
   (require 'dap-php)
   (dap-node-setup))
 
+;;; --- Debug .NET con dape + netcoredbg ---------------------------------------
+;; M-x dape RET netcoredbg-progetto  (compila, poi avvia sotto debugger)
+
+(defun my/dotnet-progetto ()
+  "Cartella che contiene il .csproj del file corrente."
+  (or (locate-dominating-file
+       default-directory
+       (lambda (dir) (directory-files dir nil "\\.csproj\\'")))
+      (user-error "Nessun .csproj sopra questa cartella")))
+
+(defun my/dotnet-dll ()
+  "La DLL del progetto: bin/Debug/<framework>/<NomeProgetto>.dll."
+  (let* ((root (my/dotnet-progetto))
+         (nome (file-name-base (car (directory-files root nil "\\.csproj\\'"))))
+         (dll (car (file-expand-wildcards
+                    (expand-file-name (format "bin/Debug/*/%s.dll" nome) root)))))
+    (or dll (user-error "DLL non trovata: il progetto si chiama %s?" nome))))
+
 (use-package dape
   :custom
-  (dape-buffer-window-arrangement 'right))
+  (dape-buffer-window-arrangement 'right)
+  (dape-inlay-hints t)                       ; valori delle variabili accanto al codice
+  :config
+  (add-to-list 'dape-configs
+               '(netcoredbg-progetto
+                 modes (csharp-mode csharp-ts-mode)
+                 ensure dape-ensure-command
+                 command "netcoredbg"
+                 command-args ["--interpreter=vscode"]
+                 command-cwd my/dotnet-progetto
+                 compile "dotnet build"      ; compila prima di ogni avvio
+                 :request "launch"
+                 :cwd my/dotnet-progetto
+                 :program my/dotnet-dll
+                 :args []
+                 :stopAtEntry nil)))
 
 (defcustom my/eglot-java-server-install-dir
   (expand-file-name ".cache/lsp/eclipse.jdt.ls/" user-emacs-directory)
@@ -2287,10 +2585,11 @@ sullo schermo dove stai lavorando."
     (keymap-unset desktop-environment-mode-map "s-l" t)
     (desktop-environment-mode 1)))
 
+;; peek.el patchato: run-with-timer con repeat t → errore (Emacs ≥ 30), vedi riga 678
 (use-package peek
-  :disabled
   :ensure nil
   :load-path (lambda () (expand-file-name "peek/" my/libs-directory))
+  :demand t   ; caricato da load-path: gli autoload non sono registrati
   :custom
   (peek-overlay-window-size 11)
   (peek-overlay-border-character ?\N{BOX DRAWINGS LIGHT HORIZONTAL})
@@ -2300,14 +2599,26 @@ sullo schermo dove stai lavorando."
   (peek-enable-eldoc-message-integration t)
   (peek-eldoc-message-overlay-position 2)
   (peek-enable-eldoc-display-integration t)
+:bind (("C-x P p" . peek-overlay-dwim)
+       ("C-x P d" . peek-xref-definition)
+       ("C-x P e" . eldoc)
+       ("C-x P m" . peek-overlay-eldoc-message-toggle-stauts))   ; sì, "stauts" è il nome vero
   :config
-  (define-key peek-mode-keymap (kbd "M-n") 'peek-next-line)
-  (define-key peek-mode-keymap (kbd "M-p") 'peek-prev-line)
-  (global-set-key (kbd "C-x P p") #'peek-overlay-dwim)
-  (global-set-key (kbd "C-x P d") #'peek-xref-definition)
-  (global-set-key (kbd "C-x P e") #'eldoc)    ; C-c c è org-capture
-  (remove-hook 'eldoc-display-functions 'eldoc-display-in-buffer)
-  (setq-default scroll-margin 5))
+  (defun mio/peek-sfondo (&rest _)
+    "Sfondo discreto per il contenuto di peek, ricavato dal tema attivo.
+Il default del pacchetto (#95a5a6 sui temi scuri) è troppo acceso."
+    (require 'color)
+    (let ((sfondo (face-background 'default nil t)))
+      (when (and sfondo (color-defined-p sfondo))
+        (set-face-attribute 'peek-overlay-content-face nil
+                            :background (if (eq (frame-parameter nil 'background-mode) 'dark)
+                                            (color-lighten-name sfondo 6)
+                                          (color-darken-name sfondo 4))))))
+  (add-hook 'enable-theme-functions #'mio/peek-sfondo)
+  (mio/peek-sfondo)
+  ;; le doc di eldoc vanno nella vista peek invece che nel buffer *eldoc*
+  (remove-hook 'eldoc-display-functions #'eldoc-display-in-buffer)
+  (global-peek-mode 1))
 
 (use-package tramp
   :ensure nil
