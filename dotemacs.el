@@ -141,6 +141,36 @@ del testo, e il bordo cambia colore a ogni segmento."
   "La prima delle FAMIGLIE di font installata, o nil."
   (seq-find (lambda (f) (find-font (font-spec :family f))) famiglie))
 
+;;; UI: colori discreti e coerenti con il tema attivo.
+(require 'color)
+
+(defun my/ui-apply-editor-faces (&rest _)
+  "Armonizza riga corrente e numeri di riga con il tema attivo."
+  (let* ((bg (face-background 'default nil t))
+         (dark (eq (frame-parameter nil 'background-mode) 'dark))
+         (subtle-bg
+          (when (and bg (color-defined-p bg))
+            (if dark
+                (color-lighten-name bg 3)
+              (color-darken-name bg 3)))))
+    ;; Riga corrente: un leggero contrasto, non una fascia vistosa.
+    (when subtle-bg
+      (set-face-attribute 'hl-line nil
+                          :background subtle-bg
+                          :extend t))
+    ;; Numeri di riga meno evidenti del codice.
+    (when (facep 'line-number)
+      (set-face-attribute 'line-number nil
+                          :inherit 'shadow
+                          :weight 'regular))
+    (when (facep 'line-number-current-line)
+      (set-face-attribute 'line-number-current-line nil
+                          :inherit 'default
+                          :weight 'bold))))
+
+(add-hook 'enable-theme-functions #'my/ui-apply-editor-faces)
+(add-hook 'after-init-hook #'my/ui-apply-editor-faces)
+
 (when-let* ((mono (my/primo-font "Inconsolata" "JetBrains Mono" "DejaVu Sans Mono")))
   (set-face-attribute 'default nil :family mono :height 90 :weight 'regular)
   (set-face-attribute 'fixed-pitch nil :family mono))
@@ -362,6 +392,7 @@ per separarla dalla finestra in basso."
   :hook (prog-mode . rainbow-delimiters-mode))
 
 (use-package highlight-parentheses
+  :disabled
   :hook (prog-mode . highlight-parentheses-mode))
 
 ;; Fa lampeggiare la riga quando il cursore salta (colori del tema)
@@ -374,14 +405,15 @@ per separarla dalla finestra in basso."
 
 (use-package indent-bars
   :config
-  (setq indent-bars-color '(highlight :face-bg t :blend 0.15)
+  (setq indent-bars-color '(highlight :face-bg t :blend 0.08)
         indent-bars-pattern "."
         indent-bars-width-frac 0.1
         indent-bars-pad-frac 0.1
         indent-bars-zigzag nil
-        indent-bars-color-by-depth '(:regexp "outline-\\([0-9]+\\)" :blend 1)
-        indent-bars-highlight-current-depth '(:blend 0.5)
-        indent-bars-display-on-blank-lines t))
+        indent-bars-color-by-depth
+        '(:regexp "outline-\\([0-9]+\\)" :blend 1)
+        indent-bars-highlight-current-depth '(:blend 0.25)
+        indent-bars-display-on-blank-lines nil))
 
 (use-package helpful
   :bind (([remap describe-function] . helpful-callable)
@@ -403,30 +435,42 @@ per separarla dalla finestra in basso."
   (setq ediff-split-window-function 'split-window-horizontally
         ediff-window-setup-function 'ediff-setup-windows-plain))
 
-;; C-x u apre l'albero delle modifiche sotto al buffer
 (use-package vundo
   :bind ("C-x u" . vundo)
   :custom
-  (vundo-glyph-alist vundo-unicode-symbols)   ; ●──○ invece di o--x
-  (vundo-compact-display t)                   ; albero più stretto
+  (vundo-glyph-alist vundo-unicode-symbols)
+  (vundo-compact-display t)
   (vundo-window-max-height 8)
   :config
   ;; i simboli dell'albero vanno allineati: sempre font monospazio
-  (set-face-attribute 'vundo-default nil :family (face-attribute 'fixed-pitch :family)))
+  (set-face-attribute 'vundo-default nil :family (face-attribute 'fixed-pitch :family))
 
-;; Più memoria per gli undo (valori di Doom): la cronologia non viene
-;; tagliata dopo poche centinaia di modifiche
-(setq undo-limit        (* 64 1024 1024)
-      undo-strong-limit (* 96 1024 1024)
-      undo-outer-limit  (* 960 1024 1024))
+  ;; Colori presi dal tema invece di quelli fissi del pacchetto
+  (set-face-attribute 'vundo-stem nil :inherit '(shadow vundo-default))            ; rami: tenui
+  (set-face-attribute 'vundo-highlight nil :foreground 'unspecified
+                      :inherit '(warning vundo-node) :weight 'bold)                ; dove sei
+  (set-face-attribute 'vundo-saved nil :foreground 'unspecified
+                      :inherit '(success vundo-node))                              ; stati salvati
+  (set-face-attribute 'vundo-last-saved nil :inherit 'vundo-saved :weight 'bold)
 
-;; La cronologia sopravvive anche alla chiusura del file e al riavvio
-(use-package undo-fu-session
-  :custom
-  (undo-fu-session-directory (expand-file-name "undo-fu-session/" my/cache-directory))
-  (undo-fu-session-incompatible-files '("\\.gpg\\'" "/COMMIT_EDITMSG\\'" "/git-rebase-todo\\'"))
-  :config
-  (undo-fu-session-global-mode 1))
+  ;; Sfondo leggermente diverso, come peek: la finestra si stacca dal codice
+  (defun my/vundo-sfondo (&rest _)
+    (require 'color)
+    (let ((sfondo (face-background 'default nil t)))
+      (when (and sfondo (color-defined-p sfondo))
+        (set-face-attribute 'vundo-default nil
+                            :background (if (eq (frame-parameter nil 'background-mode) 'dark)
+                                            (color-lighten-name sfondo 5)
+                                          (color-darken-name sfondo 3))))))
+  (add-hook 'enable-theme-functions #'my/vundo-sfondo)
+  (my/vundo-sfondo)
+
+  ;; Promemoria dei tasti in cima alla finestra
+  (add-hook 'vundo-mode-hook
+            (lambda ()
+              (setq header-line-format
+                    (propertize " ←/→ indietro/avanti   ↑/↓ cambia ramo   l ultimo salvataggio   d diff   RET conferma   q annulla"
+                                'face 'shadow)))))
 
 (use-package undo-tree
   :disabled
@@ -938,6 +982,7 @@ e la doc finisce a sinistra, sull'altro schermo."
   (org-babel-do-load-languages
    'org-babel-load-languages
    '((emacs-lisp . t)
+     (sql        . t)
      (shell . t)))
 
   ;; Titoli un po' più grandi, in scala
@@ -1012,6 +1057,10 @@ e la doc finisce a sinistra, sull'altro schermo."
   (indent-bars-mode)
   (subword-mode))
 
+(setq-default display-line-numbers-type t
+              display-line-numbers-width-start t
+              display-line-numbers-grow-only t)
+
 (use-package prog-mode
   :ensure nil
   :hook (prog-mode . my/prog-mode-setup))
@@ -1025,7 +1074,7 @@ e la doc finisce a sinistra, sull'altro schermo."
         sideline-format-left "%s   "
         sideline-format-right "   %s"
         sideline-priority 100
-        sideline-display-backend-name t))
+        sideline-display-backend-name nil))
 
 (use-package sideline-flycheck
   :hook (flycheck-mode . sideline-flycheck-setup))
@@ -1463,6 +1512,9 @@ e la doc finisce a sinistra, sull'altro schermo."
          (ng2-html-mode . my/prog-mode-setup)
          (ng2-html-mode . emmet-mode)
          (ng2-html-mode . my-ng2-html-setup)))
+
+(add-hook 'sh-mode-hook #'eglot-ensure)
+(add-hook 'bash-ts-mode-hook #'eglot-ensure)
 
 (use-package vue-ts-mode
   :ensure nil
@@ -1965,6 +2017,13 @@ Serve da limite alle regole che valgono solo dentro i tag Twig."
   (setq symbols-outline-window-position 'left)
   (symbols-outline-follow-mode))
 
+(use-package compile
+  :ensure nil
+  :custom
+  (compilation-scroll-output 'first-error)
+  (compilation-ask-about-save nil)
+  :bind ("<f5>" . recompile))
+
 (use-package eldoc
   :ensure nil
   :config
@@ -2083,6 +2142,7 @@ Serve da limite alle regole che valgono solo dentro i tag Twig."
 (use-package diff-hl
   :ensure t
   :hook ((after-init         . global-diff-hl-mode)
+         (prog-mode          . diff-hl-mode)
          (dired-mode         . diff-hl-dired-mode)
          (magit-pre-refresh  . diff-hl-magit-pre-refresh)
          (magit-post-refresh . diff-hl-magit-post-refresh))

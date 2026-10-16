@@ -348,6 +348,7 @@ Se un font manca si passa al successivo della lista.
 
 (add-hook 'enable-theme-functions #'my/ui-apply-editor-faces)
 (add-hook 'after-init-hook #'my/ui-apply-editor-faces)
+
 (when-let* ((mono (my/primo-font "Inconsolata" "JetBrains Mono" "DejaVu Sans Mono")))
   (set-face-attribute 'default nil :family mono :height 90 :weight 'regular)
   (set-face-attribute 'fixed-pitch nil :family mono))
@@ -628,6 +629,7 @@ All'avvio: file recenti, progetti e agenda.
   :hook (prog-mode . rainbow-delimiters-mode))
 
 (use-package highlight-parentheses
+  :disabled
   :hook (prog-mode . highlight-parentheses-mode))
 
 ;; Fa lampeggiare la riga quando il cursore salta (colori del tema)
@@ -640,14 +642,15 @@ All'avvio: file recenti, progetti e agenda.
 
 (use-package indent-bars
   :config
-  (setq indent-bars-color '(highlight :face-bg t :blend 0.15)
+  (setq indent-bars-color '(highlight :face-bg t :blend 0.08)
         indent-bars-pattern "."
         indent-bars-width-frac 0.1
         indent-bars-pad-frac 0.1
         indent-bars-zigzag nil
-        indent-bars-color-by-depth '(:regexp "outline-\\([0-9]+\\)" :blend 1)
-        indent-bars-highlight-current-depth '(:blend 0.5)
-        indent-bars-display-on-blank-lines t))
+        indent-bars-color-by-depth
+        '(:regexp "outline-\\([0-9]+\\)" :blend 1)
+        indent-bars-highlight-current-depth '(:blend 0.25)
+        indent-bars-display-on-blank-lines nil))
 #+end_src
 
 ** Helpful
@@ -1296,6 +1299,7 @@ Il completamento parte da solo dopo 1 carattere: niente tasto manuale
   (org-babel-do-load-languages
    'org-babel-load-languages
    '((emacs-lisp . t)
+     (sql        . t)
      (shell . t)))
 
   ;; Titoli un po' più grandi, in scala
@@ -1392,6 +1396,10 @@ Il completamento parte da solo dopo 1 carattere: niente tasto manuale
   (indent-bars-mode)
   (subword-mode))
 
+(setq-default display-line-numbers-type t
+              display-line-numbers-width-start t
+              display-line-numbers-grow-only t)
+
 (use-package prog-mode
   :ensure nil
   :hook (prog-mode . my/prog-mode-setup))
@@ -1409,7 +1417,7 @@ Il completamento parte da solo dopo 1 carattere: niente tasto manuale
         sideline-format-left "%s   "
         sideline-format-right "   %s"
         sideline-priority 100
-        sideline-display-backend-name t))
+        sideline-display-backend-name nil))
 
 (use-package sideline-flycheck
   :hook (flycheck-mode . sideline-flycheck-setup))
@@ -1911,6 +1919,15 @@ LSP-mode è usato solo per Java, Python e Vue.
          (ng2-html-mode . emmet-mode)
          (ng2-html-mode . my-ng2-html-setup)))
 #+end_src
+
+
+*** Bash: language server
+
+#+begin_src emacs-lisp
+(add-hook 'sh-mode-hook #'eglot-ensure)
+(add-hook 'bash-ts-mode-hook #'eglot-ensure)
+#+end_src
+
 
 *** Vue
 
@@ -2505,6 +2522,19 @@ Una volta sola: =M-x devdocs-install= e scegli =csharp=, =postgresql~17=, =bash=
   (symbols-outline-follow-mode))
 #+end_src
 
+** Compile
+
+#+begin_src emacs-lisp
+
+(use-package compile
+  :ensure nil
+  :custom
+  (compilation-scroll-output 'first-error)
+  (compilation-ask-about-save nil)
+  :bind ("<f5>" . recompile))
+
+#+end_src
+
 ** Eldoc
 
 #+begin_src emacs-lisp
@@ -2649,6 +2679,7 @@ sostituirle: i progetti git restano riconosciuti anche senza Projectile.
 (use-package diff-hl
   :ensure t
   :hook ((after-init         . global-diff-hl-mode)
+         (prog-mode          . diff-hl-mode)
          (dired-mode         . diff-hl-dired-mode)
          (magit-pre-refresh  . diff-hl-magit-pre-refresh)
          (magit-post-refresh . diff-hl-magit-post-refresh))
