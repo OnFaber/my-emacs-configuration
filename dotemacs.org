@@ -883,7 +883,6 @@ sull'Arch e sul PC Ubuntu.
   (global-undo-tree-mode 1))
 #+end_src
 
-
 * Completamento e Navigazione
 ** Vertico + Orderless + Marginalia
 
