@@ -309,19 +309,40 @@ del testo, e il bordo cambia colore a ogni segmento."
 #+end_src
 
 ** Font
-
+ 
 Da installare: =sudo pacman -S ttf-jetbrains-mono ttf-cascadia-code inter-font=.
 Se un font manca si passa al successivo della lista.
 
 #+begin_src emacs-lisp
-
+;;; Font: monospace ovunque, proporzionale disponibile per chi lo usa
+ 
 (defun my/primo-font (&rest famiglie)
   "La prima delle FAMIGLIE di font installata, o nil."
   (seq-find (lambda (f) (find-font (font-spec :family f))) famiglie))
-
-;;; UI: colori discreti e coerenti con il tema attivo.
+ 
+(let ((mono  (my/primo-font  "GeistMono Nerd Font Mono"
+                             "CommitMono Nerd Font Mono"
+                            "Inconsolata"
+                            "IosevkaTerm Nerd Font Mono"))
+      (testo (my/primo-font "Inter" "Inter Display" "Noto Sans")))
+  ;; Font globale: editor, interfaccia e Org
+  (when mono
+    (set-face-attribute 'default nil
+                        :family mono :height 100 :weight 'regular)
+    (set-face-attribute 'fixed-pitch nil
+                        :family mono :height 1.0 :weight 'regular))
+  ;; Proporzionale: usato solo dai modi che lo chiedono (Info, EWW, …)
+  (when testo
+    (set-face-attribute 'variable-pitch nil
+                        :family testo :height 1.0 :weight 'regular)))
+#+end_src
+ 
+ 
+#+begin_src emacs-lisp
+;;; UI: colori discreti e coerenti con il tema attivo
 (require 'color)
-
+(require 'hl-line)
+ 
 (defun my/ui-apply-editor-faces (&rest _)
   "Armonizza riga corrente e numeri di riga con il tema attivo."
   (let* ((bg (face-background 'default nil t))
@@ -331,37 +352,24 @@ Se un font manca si passa al successivo della lista.
             (if dark
                 (color-lighten-name bg 3)
               (color-darken-name bg 3)))))
-    ;; Riga corrente: un leggero contrasto, non una fascia vistosa.
+    ;; Riga corrente: un leggero contrasto, non una fascia vistosa
     (when subtle-bg
       (set-face-attribute 'hl-line nil
                           :background subtle-bg
                           :extend t))
-    ;; Numeri di riga meno evidenti del codice.
-    (when (facep 'line-number)
-      (set-face-attribute 'line-number nil
-                          :inherit 'shadow
-                          :weight 'regular))
-    (when (facep 'line-number-current-line)
-      (set-face-attribute 'line-number-current-line nil
-                          :inherit 'default
-                          :weight 'bold))))
-
+    ;; Numeri di riga meno evidenti del codice
+    (set-face-attribute 'line-number nil
+                        :inherit 'shadow
+                        :weight 'regular)
+    (set-face-attribute 'line-number-current-line nil
+                        :inherit 'default
+                        :weight 'bold)))
+ 
 (add-hook 'enable-theme-functions #'my/ui-apply-editor-faces)
 (add-hook 'after-init-hook #'my/ui-apply-editor-faces)
 
-(when-let* ((mono (my/primo-font "Inconsolata" "JetBrains Mono" "DejaVu Sans Mono")))
-  (set-face-attribute 'default nil :family mono :height 90 :weight 'regular)
-  (set-face-attribute 'fixed-pitch nil :family mono))
-
-(when-let* ((testo (my/primo-font "DejaVu Sans" "Inter" "Noto Sans")))
-  (set-face-attribute 'variable-pitch nil :family testo))
-
-;; In org il testo normale usa il font proporzionale;
-;; codice, tabelle e blocchi restano monospazio
-(use-package mixed-pitch
-  :hook (org-mode . mixed-pitch-mode))
 #+end_src
-
+ 
 * UI
 ** Icone
 
@@ -593,24 +601,162 @@ I buffer di servizio compaiono in basso e si chiudono con un tasto.
   (popper-echo-mode 1))
 #+end_src
 
-** Dashboard (da Spacemacs)
-
-All'avvio: file recenti, progetti e agenda.
-
+** Dashboard
+ 
+Schermata d'avvio: banner, saluto in base all'ora, pulsanti rapidi, file
+recenti, progetti e agenda della settimana, tutto centrato. Il banner viene
+scritto in =banner.txt= dentro la cartella della config, così funziona uguale
+sull'Arch e sul PC Ubuntu.
+ 
 #+begin_src emacs-lisp
+;;; Dashboard
+ 
+(defconst my/dashboard-banner "\
+███████╗███╗   ███╗ █████╗  ██████╗███████╗
+██╔════╝████╗ ████║██╔══██╗██╔════╝██╔════╝
+█████╗  ██╔████╔██║███████║██║     ███████╗
+██╔══╝  ██║╚██╔╝██║██╔══██║██║     ╚════██║
+███████╗██║ ╚═╝ ██║██║  ██║╚██████╗███████║
+╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝ ╚═════╝╚══════╝"
+  "Banner ASCII della dashboard.")
+ 
+(defun my/dashboard-banner-file ()
+  "Scrive il banner in banner.txt (solo se è cambiato) e ne restituisce il percorso."
+  (let ((file (expand-file-name "banner.txt" user-emacs-directory)))
+    (unless (and (file-exists-p file)
+                 (string= my/dashboard-banner
+                          (with-temp-buffer
+                            (insert-file-contents file)
+                            (buffer-string))))
+      (with-temp-file file
+        (insert my/dashboard-banner)))
+    file))
+ 
+(defun my/dashboard-saluto ()
+  "Saluto in base all'ora del giorno."
+  (let ((ora (string-to-number (format-time-string "%H")))
+        (nome (car (split-string (or (user-full-name) "") " " t))))
+    (format "%s%s"
+            (cond ((< ora 6)  "Ancora sveglio")
+                  ((< ora 13) "Buongiorno")
+                  ((< ora 18) "Buon pomeriggio")
+                  (t          "Buonasera"))
+            (if (and nome (not (string-empty-p nome)))
+                (concat ", " nome)
+              ""))))
+ 
+(defun my/dashboard-config-file ()
+  "Il file literate della config: config.org sull'Arch, dotemacs.org su Ubuntu."
+  (seq-find #'file-exists-p
+            (mapcar (lambda (f) (expand-file-name f user-emacs-directory))
+                    '("config.org" "dotemacs.org"))))
+ 
 (use-package dashboard
+  :demand t
   :custom
-  (dashboard-items '((recents . 8) (projects . 5) (agenda . 5)))
-  (dashboard-set-file-icons t)
-  (dashboard-icon-type 'nerd-icons)
+  ;; ── Struttura ──────────────────────────────────────────
+  (dashboard-startupify-list
+   '(dashboard-insert-banner
+     dashboard-insert-newline
+     dashboard-insert-banner-title
+     dashboard-insert-newline
+     dashboard-insert-navigator
+     dashboard-insert-newline
+     dashboard-insert-init-info
+     dashboard-insert-items
+     dashboard-insert-newline
+     dashboard-insert-footer))
+  (dashboard-center-content t)
+  (dashboard-vertically-center-content t)
+ 
+  ;; ── Contenuti ──────────────────────────────────────────
+  (dashboard-items '((recents  . 6)
+                     (projects . 5)
+                     (agenda   . 6)))
+  (dashboard-item-names
+   '(("Recent Files:"               . "File recenti")
+     ("Projects:"                   . "Progetti")
+     ("Agenda for the coming week:" . "Settimana")
+     ("Agenda for today:"           . "Oggi")))
   (dashboard-projects-backend 'project-el)
+  (dashboard-week-agenda t)
+  (dashboard-agenda-sort-strategy '(time-up))
+  (dashboard-agenda-prefix-format " %-10:c %s ")
+  (dashboard-agenda-release-buffers t)
+  (dashboard-recentf-show-base t)          ; mostra il nome, non il percorso intero
+  (dashboard-path-max-length 50)
+ 
+  ;; ── Icone ──────────────────────────────────────────────
+  (dashboard-icon-type 'nerd-icons)
+  (dashboard-display-icons-p t)
+  (dashboard-set-file-icons t)
+  (dashboard-set-heading-icons t)
+ 
+  ;; ── Footer ─────────────────────────────────────────────
+  (dashboard-footer-messages
+   '("Il codice migliore è quello che non devi scrivere."
+     "Prima fallo funzionare, poi fallo bello, poi fallo veloce."
+     "C-x C-c non è un'opzione."
+     "Un commit piccolo al giorno toglie il merge conflict di torno."
+     "Leggi l'errore. Tutto. Fino in fondo."
+     "M-x butterfly"
+     "Emacs: un ottimo sistema operativo, gli manca solo un buon editor."))
+ 
   :config
+  (require 'nerd-icons)
+ 
+  ;; Banner e saluto ricalcolati a ogni apertura della dashboard
+  (setq dashboard-startup-banner (my/dashboard-banner-file))
+  (add-hook 'dashboard-before-initialize-hook
+            (lambda ()
+              (setq dashboard-banner-logo-title (my/dashboard-saluto))))
+ 
+  ;; Riga sotto il banner: pacchetti e tempo di avvio
+  (setq dashboard-init-info
+        (lambda ()
+          (format "%d pacchetti · avvio in %s"
+                  (length package-activated-list)
+                  (emacs-init-time "%.2f s"))))
+ 
+  ;; Pulsanti rapidi sotto il saluto
+  (setq dashboard-navigator-buttons
+        `(((,(nerd-icons-octicon "nf-oct-calendar")
+            " Agenda" "Agenda della settimana"
+            (lambda (&rest _) (org-agenda nil "a")))
+           (,(nerd-icons-octicon "nf-oct-pencil")
+            " Cattura" "Nuova nota o TODO"
+            (lambda (&rest _) (org-capture)))
+           (,(nerd-icons-octicon "nf-oct-repo")
+            " Progetti" "Apri un progetto"
+            (lambda (&rest _) (call-interactively #'project-switch-project)))
+           (,(nerd-icons-octicon "nf-oct-gear")
+            " Config" "Apri la config literate"
+            (lambda (&rest _)
+              (when-let* ((f (my/dashboard-config-file)))
+                (find-file f)))))))
+ 
+  ;; Aspetto: banner in evidenza, titoli delle sezioni in grassetto
+  (set-face-attribute 'dashboard-banner-logo-title nil
+                      :height 1.2 :weight 'bold)
+  (set-face-attribute 'dashboard-heading nil :weight 'bold)
+ 
+  ;; Niente cursore: la riga corrente la mostra hl-line
+  (add-hook 'dashboard-mode-hook
+            (lambda ()
+              (setq-local cursor-type nil)
+              (hl-line-mode 1)
+              (display-line-numbers-mode -1)))
+ 
   (dashboard-setup-startup-hook)
   (add-hook 'window-setup-hook
             (lambda ()
               (when-let* ((buf (get-buffer dashboard-buffer-name)))
                 (switch-to-buffer buf)
-                (delete-other-windows)))))
+                (delete-other-windows))))
+ 
+  ;; Anche con emacsclient si apre la dashboard
+  (setq initial-buffer-choice
+        (lambda () (get-buffer-create dashboard-buffer-name))))
 #+end_src
 
 ** Highlight e Colori
@@ -737,108 +883,6 @@ All'avvio: file recenti, progetti e agenda.
   (global-undo-tree-mode 1))
 #+end_src
 
-** Minimap
-
-#+begin_src emacs-lisp
-(defun my/minimap-colori (&rest _)
-  "Colori della minimap ricavati dal tema."
-  (require 'color)
-  (let ((sfondo (face-background 'default nil t))
-        (testo  (face-foreground 'default nil t)))
-    (when (and sfondo (color-defined-p sfondo))
-      (let ((scuro (eq (frame-parameter nil 'background-mode) 'dark)))
-        ;; fascia della parte visibile (era il rosso #700000)
-        (set-face-attribute 'minimap-active-region-background nil
-                            :background (if scuro (color-lighten-name sfondo 12)
-                                          (color-darken-name sfondo 8)))
-        ;; riga corrente: il pacchetto usa anche il :foreground di questa face
-        ;; e, se manca, genera "Invalid face attribute :foreground nil"
-        (set-face-attribute 'minimap-current-line-face nil
-                            :background (if scuro (color-lighten-name sfondo 25)
-                                          (color-darken-name sfondo 15))
-                            :foreground testo)))))
-
-(defun my/minimap-fuori-posto-p ()
-  "Vero se la minimap non è più accanto alla finestra del codice."
-  (when-let* ((mm (minimap-get-window))
-              ((buffer-live-p minimap-active-buffer))
-              (src (get-buffer-window minimap-active-buffer)))
-    (not (eq (window-in-direction
-              (if (eq minimap-window-location 'left) 'right 'left) mm)
-             src))))
-
-(defun my/minimap-riaggancia ()
-  "Se la minimap si è staccata dal codice, la ricrea subito accanto al codice."
-  (when (and (bound-and-true-p minimap-mode)
-             (not (active-minibuffer-window))
-             (my/minimap-fuori-posto-p))
-    (let ((src (get-buffer-window minimap-active-buffer)))
-      (delete-window (minimap-get-window))
-      ;; la crea dividendo la finestra del CODICE, non quella selezionata
-      (let ((mm (with-selected-window src (minimap-create-window))))
-        (with-selected-window mm
-          (set-window-dedicated-p nil nil)
-          (switch-to-buffer minimap-buffer-name t t)
-          (when minimap-hide-fringes (set-window-fringes nil 0 0))
-          (when minimap-dedicated-window (set-window-dedicated-p nil t))))
-      ;; e la sincronizza con la posizione nel codice
-      (with-selected-window src (minimap-update t)))))
-
-(add-hook 'window-configuration-change-hook
-          (lambda () (run-with-timer 0 nil #'my/minimap-riaggancia)))
-
-(defvar my/minimap-frazione 0.08
-  "Larghezza della minimap come frazione del FRAME, non della finestra del codice.")
-(defvar my/minimap-larghezza-minima 12)
-
-(defun my/minimap-larghezza ()
-  (max my/minimap-larghezza-minima
-       (round (* (frame-width) my/minimap-frazione))))
-
-(defun my/minimap-larghezza-dal-frame (orig &rest args)
-  "Crea la minimap con una larghezza calcolata sul frame, qualunque sia lo split."
-  (let ((minimap-width-fraction 0)                         ; annulla il calcolo sulla finestra…
-        (minimap-minimum-width (my/minimap-larghezza)))    ; …così vince sempre il "minimo"
-    (apply orig args)))
-(advice-add 'minimap-create-window :around #'my/minimap-larghezza-dal-frame)
-
-   (defun my/senza-minimap (orig &rest args)
-     "Esegue ORIG con la minimap spenta, poi la riaccende se era attiva."
-     (let ((era-attiva (bound-and-true-p minimap-mode)))
-       (when era-attiva (minimap-mode -1))
-       (unwind-protect (apply orig args)
-         (when era-attiva (minimap-mode 1)))))
-   (advice-add 'org-babel-tangle :around #'my/senza-minimap)
-
-(with-eval-after-load 'doom-modeline
-  ;; mode line doom vuota: solo il segmento 'bar, che le dà l'altezza giusta
-  (doom-modeline-def-modeline 'minimap '(bar) '()))
-
-(add-hook 'minimap-sb-mode-hook
-          (lambda ()
-            (setq-local window-size-fixed 'width)
-            (setq-local fringe-indicator-alist (cons '(truncation nil nil) fringe-indicator-alist))
-            (if (fboundp 'doom-modeline-set-modeline)
-                (doom-modeline-set-modeline 'minimap)    ; stessa altezza e stile di doom
-              (setq-local mode-line-format ""))          ; ripiego se doom non c'è
-            (face-remap-add-relative 'mode-line-inactive 'mode-line-active)))
-
-(use-package minimap
-  :disabled
-  :hook (prog-mode . (lambda () (minimap-mode 1)))
-  :custom
-  (minimap-major-modes '(prog-mode))
-  (minimap-window-location 'right)
-  (minimap-disable-mode-line nil)
-  (minimap-hide-fringes t)
-  (minimap-minimum-width 15)
-  (minimap-update-delay 0.2)
-  :bind ("C-x M" . minimap-mode)
-  :config
-  (add-hook 'enable-theme-functions #'my/minimap-colori)
-  (my/minimap-colori))
-
-#+end_src
 
 * Completamento e Navigazione
 ** Vertico + Orderless + Marginalia
@@ -1239,95 +1283,164 @@ Il completamento parte da solo dopo 1 carattere: niente tasto manuale
 
 #+end_src
 
-* Org
 
+ Org
+ 
+** Tipografia
+ 
+Tutto monospace: la gerarchia delle intestazioni è data solo da dimensione
+e peso. Il font viene preso dalla face =default=, così segue la scelta fatta
+nella sezione Font. Viene riapplicata a ogni cambio di tema, perché il tema
+può sovrascrivere le face (alcuni fanno ereditare i titoli da
+=variable-pitch=).
+ 
+#+begin_src emacs-lisp
+;;; Org: tipografia (i colori restano quelli del tema)
+ 
+(defun my/org-faces ()
+  "Org tutto monospace: gerarchia data solo da dimensione e peso."
+  (let ((mono (face-attribute 'default :family)))
+    ;; Titolo e intestazioni
+    (dolist (spec '((org-document-title . 1.40)
+                    (org-level-1 . 1.25)
+                    (org-level-2 . 1.15)
+                    (org-level-3 . 1.08)
+                    (org-level-4 . 1.00)
+                    (org-level-5 . 1.00)
+                    (org-level-6 . 1.00)
+                    (org-level-7 . 1.00)
+                    (org-level-8 . 1.00)))
+      (set-face-attribute (car spec) nil
+                          :family mono
+                          :height (cdr spec)
+                          :weight 'bold))
+ 
+    ;; Delimitatori e metadati: presenti ma discreti
+    (dolist (face '(org-block-begin-line
+                    org-block-end-line
+                    org-meta-line
+                    org-document-info-keyword))
+      (set-face-attribute face nil :inherit 'shadow :weight 'regular))))
+ 
+(add-hook 'enable-theme-functions
+          (lambda (&rest _)
+            (when (featurep 'org)
+              (my/org-faces))))
+#+end_src
+ 
+** Configurazione
+ 
 #+begin_src emacs-lisp
 (use-package org
-  :ensure nil                                   ; org è incluso in Emacs
-  :hook ((org-mode . visual-line-mode)          ; a capo morbido sulle righe lunghe
-         (org-mode . (lambda () (electric-indent-local-mode -1))))
-  :bind (("C-c a" . org-agenda)
-         ("C-c c" . org-capture)
-         ("C-c l" . org-store-link)
-         :map org-mode-map
-         ("M-g o" . consult-org-heading))       ; intestazioni con livello/TODO/priorità
+  :ensure nil
+  :hook
+  ((org-mode . visual-line-mode)
+   (org-mode . org-indent-mode)
+   (org-mode . my/org-buffer-setup))
+ 
+  :bind
+  (("C-c a" . org-agenda)
+   ("C-c c" . org-capture)
+   ("C-c l" . org-store-link)
+   :map org-mode-map
+   ("M-g o" . consult-org-heading))
+ 
   :custom
-  ;; ── Aspetto ────────────────────────────────────────────
-  (org-hide-emphasis-markers t)                 ; *grassetto* senza asterischi visibili
-  (org-pretty-entities t)                       ; \alpha → α, a_1 → pedice
-  (org-ellipsis " ▾")                           ; al posto di "..." sui sottoalberi chiusi
-  (org-startup-folded 'content)                 ; apre mostrando solo le intestazioni
+  ;; ── Aspetto generale ───────────────────────────────────
+  (org-hide-emphasis-markers t)
+  (org-pretty-entities t)
+  (org-ellipsis " …")
+  (org-startup-folded 'show2levels)
   (org-startup-with-inline-images t)
   (org-image-actual-width '(600))
   (org-auto-align-tags nil)
-  (org-tags-column 0)                           ; tag subito dopo il titolo (si sposa con org-modern)
-
+  (org-tags-column 0)
+  (org-fontify-quote-and-verse-blocks t)
+  (org-cycle-separator-lines 2)
+ 
   ;; ── Editing ────────────────────────────────────────────
-  (org-special-ctrl-a/e t)                      ; C-a/C-e ignorano stelle e tag
-  (org-insert-heading-respect-content t)        ; C-RET crea l'intestazione dopo il sottoalbero
-  (org-catch-invisible-edits 'show-and-error)   ; niente modifiche alla cieca dentro testo piegato
+  (org-special-ctrl-a/e t)
+  (org-insert-heading-respect-content t)
+  (org-catch-invisible-edits 'show-and-error)
   (org-return-follows-link t)
-
-  ;; ── Blocchi di codice (per la config literate) ─────────
+ 
+  ;; ── Blocchi di codice ──────────────────────────────────
   (org-src-fontify-natively t)
   (org-src-tab-acts-natively t)
   (org-src-preserve-indentation t)
   (org-edit-src-content-indentation 0)
-  (org-src-window-setup 'current-window)        ; C-c ' apre il blocco nella finestra corrente
-  (org-confirm-babel-evaluate nil)              ; C-c C-c sui blocchi senza conferma
-
+  (org-src-window-setup 'current-window)
+  (org-confirm-babel-evaluate nil)
+ 
   ;; ── TODO e agenda ──────────────────────────────────────
   (org-todo-keywords
-   '((sequence "TODO(t)" "NEXT(n)" "WAIT(w@)" "|" "DONE(d!)" "CANC(c@)")))
+   '((sequence "TODO(t)" "NEXT(n)" "WAIT(w@)"
+               "|" "DONE(d!)" "CANC(c@)")))
   (org-log-done 'time)
   (org-log-into-drawer t)
   (org-directory "~/org")
   (org-agenda-files '("~/org"))
   (org-agenda-tags-column 0)
-  (org-agenda-start-on-weekday 1)               ; settimana da lunedì
-
+  (org-agenda-start-on-weekday 1)
+ 
+  :init
+  (defun my/org-buffer-setup ()
+    "Impostazioni locali per ogni buffer Org."
+    (electric-indent-local-mode -1)
+    (setq-local line-spacing 0.12))
+ 
   :config
-  ;; Template veloci: <el TAB → blocco emacs-lisp, <sh TAB → bash, ecc.
+  (my/org-faces)
+ 
+  ;; Template rapidi: <el TAB, <sh TAB, ecc.
   (require 'org-tempo)
   (dolist (tpl '(("el" . "src emacs-lisp")
                  ("sh" . "src bash")
                  ("cs" . "src csharp")
                  ("py" . "src python")))
     (add-to-list 'org-structure-template-alist tpl))
-
+ 
   ;; Linguaggi eseguibili con C-c C-c
   (org-babel-do-load-languages
    'org-babel-load-languages
    '((emacs-lisp . t)
-     (sql        . t)
-     (shell . t)))
-
-  ;; Titoli un po' più grandi, in scala
-  (set-face-attribute 'org-document-title nil :height 1.5 :weight 'bold)
-  (dolist (face '((org-level-1 . 1.2)
-                  (org-level-2 . 1.15)
-                  (org-level-3 . 1.05)))
-    (set-face-attribute (car face) nil :height (cdr face) :weight 'semi-bold)))
+     (shell . t))))
 #+end_src
-
+ 
+** org-modern
+ 
 #+begin_src emacs-lisp
 ;; Stelle, liste, checkbox, tabelle, tag e blocchi resi graficamente
 (use-package org-modern
   :after org
   :custom
-  ;; titoli: triangolo pieno se chiuso, aperto verso il basso se espanso
+  ;; Intestazioni: indicatori semplici, senza icone Nerd Font
   (org-modern-star 'fold)
-  (org-modern-fold-stars '((" " . " ") ("›" . "⌄") ("›" . "⌄") ("›" . "⌄") ("›" . "⌄")))
-  (org-modern-hide-stars nil)          ; niente stelle "fantasma" a sinistra
-  ;; elenchi
-  (org-modern-list '((?- . "•") (?+ . "◦") (?* . "▹")))
+  (org-modern-fold-stars
+   '(("▸" . "▾")
+     ("›" . "⌄")
+     ("›" . "⌄")
+     ("›" . "⌄")
+     ("›" . "⌄")))
+  (org-modern-hide-stars nil)
+ 
+  ;; Elenchi
+  (org-modern-list
+   '((?- . "•")
+     (?+ . "◦")
+     (?* . "▹")))
+ 
   :config
-  (global-org-modern-mode)
-  ;; mantieni lo stile anche nell'anteprima di consult
+  (global-org-modern-mode 1)
+ 
+  ;; Conserva org-modern nelle anteprime di Consult
   (with-eval-after-load 'consult
-    (add-to-list 'consult-preview-allowed-hooks 'global-org-modern-mode)))
+    (add-to-list 'consult-preview-allowed-hooks
+                 'global-org-modern-mode)))
 #+end_src
-
+ 
+** org-appear
+ 
 #+begin_src emacs-lisp
 ;; Mostra *marcatori* e [[link]] solo quando il cursore ci passa sopra
 (use-package org-appear
@@ -2731,64 +2844,230 @@ sostituirle: i progetti git restano riconosciuti anche senza Projectile.
 
 #+end_src
 
-* Treemacs
 
 #+begin_src emacs-lisp
 (use-package treemacs
+  :defer t
+  :bind
+  (("M-0"       . treemacs-select-window)
+   ("C-x t t"   . treemacs)
+   ("C-x t d"   . treemacs-select-directory)
+   ("C-x t 1"   . treemacs-delete-other-windows)
+   ("C-x t B"   . treemacs-bookmark)
+   ("C-x t C-t" . treemacs-find-file)
+   ("C-x t M-t" . treemacs-find-tag))
+ 
+  :custom
+  (treemacs-width 32)
+  (treemacs-width-is-initially-locked nil) ; si può allargare col mouse
+  (treemacs-position 'left)
+  (treemacs-is-never-other-window t)       ; C-x o lo salta
+  (treemacs-show-hidden-files t)
+  (treemacs-sorting 'alphabetic-case-insensitive-asc)
+  (treemacs-collapse-dirs 3)               ; src/main/java su una riga
+  (treemacs-indentation 2)
+  (treemacs-silent-refresh t)
+  (treemacs-silent-filewatch t)
+  (treemacs-move-forward-on-expand nil)
+  (treemacs-recenter-after-file-follow 'on-distance)
+  (treemacs-project-follow-cleanup t)
+  (treemacs-persist-file
+   (expand-file-name "treemacs-persist" user-emacs-directory))
+ 
   :config
-  (setq treemacs-width 35
-        treemacs-follow-after-init t)
-  (treemacs-follow-mode t)
-  (treemacs-filewatch-mode t)
-  (treemacs-git-mode 'deferred))
-
+  ;; Segue il file corrente e aggiorna l'albero quando i file cambiano
+  (treemacs-follow-mode 1)
+  (treemacs-filewatch-mode 1)
+  (treemacs-fringe-indicator-mode 'always)
+ 
+  ;; Nasconde i file ignorati da git
+  (treemacs-hide-gitignored-files-mode 1)
+ 
+  ;; Stato git colorato: la modalità completa richiede python3
+  (treemacs-git-mode (if (executable-find "python3") 'deferred 'simple))
+ 
+  ;; Niente numeri di riga nel pannello
+  (add-hook 'treemacs-mode-hook
+            (lambda () (display-line-numbers-mode -1))))
+ 
+;; Icone Nerd Font, coerenti con il resto della config
 (use-package treemacs-nerd-icons
   :after treemacs
   :config
   (treemacs-load-theme "nerd-icons"))
-
+ 
+;; Aggiorna lo stato git dell'albero dopo le operazioni Magit
 (use-package treemacs-magit
   :after (treemacs magit))
 #+end_src
-
+ 
 * Dired
 
 #+begin_src emacs-lisp
+;;; --- Dired: la base su cui lavora dirvish -----------------------------------
+
 (use-package dired
   :ensure nil
+  :custom
+  ;; Opzioni passate a `ls' (GNU, quindi valgono anche su Rocky e Debian via TRAMP):
+  ;;   -l            formato lungo (permessi, proprietario, dimensione, data)
+  ;;   --almost-all  mostra i file nascosti, ma non . e ..
+  ;;   --human-readable  4,0K / 12M invece dei byte
+  ;;   --group-directories-first  prima le cartelle, poi i file
+  ;;   --no-group    nasconde la colonna del gruppo (meno rumore)
+  (dired-listing-switches
+   "-l --almost-all --human-readable --group-directories-first --no-group")
+  ;; Con due finestre dired affiancate, copia/sposta propone l'altra come destinazione
+  (dired-dwim-target t)
+  ;; Copie e cancellazioni ricorsive senza chiedere conferma per ogni sottocartella
+  (dired-recursive-copies 'always)
+  (dired-recursive-deletes 'top)
+  ;; Cancellare = spostare nel cestino, non distruggere
+  (delete-by-moving-to-trash t)
+  ;; Aprendo una cartella, chiude il buffer della precedente: niente decine di
+  ;; buffer dired aperti dopo una navigazione
+  (dired-kill-when-opening-new-dired-buffer t)
+  ;; Mouse (Emacs 29+): trascinare file da dired ad altri programmi
+  (dired-mouse-drag-files t)
+  (mouse-drag-and-drop-region-cross-program t)
   :config
-  (setq dired-listing-switches "-ahlB --group-directories-first"
-        dired-free-space 'separate)
-  (put 'dired-find-alternate-file 'disabled nil)
-  :bind (:map dired-mode-map
-              ("* n" . dired-create-empty-file)))
+  ;; `a' in dired apre la cartella nello stesso buffer: Emacs lo considera
+  ;; "pericoloso" per i principianti e lo disabilita; lo riabilitiamo
+  (put 'dired-find-alternate-file 'disabled nil))
+#+end_src
 
-(use-package nerd-icons-dired
-  :hook (dired-mode . nerd-icons-dired-mode))
+* Dirvish
+
+#+begin_src emacs-lisp
+;;; ===========================================================================
+;;; DIRVISH — dired con superpoteri: anteprima dei file, icone, stato git,
+;;; sottocartelle espandibili, menu per ogni operazione.
+;;; Non sostituisce dired: lo "veste". Tutti i tasti di dired (m, u, C, R, D,
+;;; +, g, ^...) continuano a funzionare; dirvish aggiunge sopra.
+;;; ===========================================================================
+
+;;; --- Icone -------------------------------------------------------------------
+
+;; Le stesse icone di doom-modeline. Se vedi quadratini al posto delle icone:
+;; M-x nerd-icons-install-fonts
+(use-package nerd-icons
+  :ensure t)
+
+;;; --- Dirvish -------------------------------------------------------------------
+
+(use-package dirvish
+  :ensure t
+  :init
+  ;; Da ora ogni `dired' (C-x d, C-x C-j, i link da eshell...) si apre in dirvish
+  (dirvish-override-dired-mode)
+
+  :custom
+  ;; Salti rapidi con `o': un tasto → una cartella.
+  ;; È un'opzione :custom: con setq NON funziona (va passata da qui o da M-x customize)
+  (dirvish-quick-access-entries
+   '(("h" "~/"                                  "Home")
+     ("s" "~/Documents/studio-cert/"            "Studio cert")
+     ("k" "~/Documents/studio-cert/kb/"         "Knowledge base")
+     ("a" "~/tmp/attivita/"                     "GestoreAttivita")
+     ("c" "~/tmp/cruscotto/"                    "Cruscotto")
+     ("d" "~/Downloads/"                        "Download")
+     ("r" "/ssh:rocky:~/"                       "VM Rocky")
+     ("b" "/ssh:debian:~/"                      "VM Debian")
+     ("e" "/sudo::/etc/"                        "/etc come root")
+     ("i" "/sudo::/var/lib/libvirt/images/"     "Immagini delle VM")
+     ("t" "~/.local/share/Trash/files/"         "Cestino")))
+
+  ;; Colonne/decorazioni per ogni file. L'ordine conta.
+  ;;   vc-state      barretta colorata a sinistra: file modificato/nuovo per git
+  ;;   subtree-state freccina ▸/▾ sulle cartelle espandibili con TAB
+  ;;   nerd-icons    icona per tipo di file
+  ;;   collapse      a/b/c con una sola sottocartella → mostrata come un percorso unico
+  ;;   git-msg       messaggio dell'ultimo commit del file (comodo, ma costa:
+  ;;                 se una cartella grande diventa lenta, toglilo per primo)
+  ;;   file-time     data di modifica
+  ;;   file-size     dimensione
+  (dirvish-attributes
+   '(vc-state subtree-state nerd-icons collapse git-msg file-time file-size))
+
+  ;; Nel pannello laterale (dirvish-side) c'è poco spazio: meno colonne
+  (dirvish-side-attributes
+   '(vc-state nerd-icons collapse file-size))
+
+  ;; Riga in alto: percorso a sinistra, spazio libero sul disco a destra
+  (dirvish-header-line-format
+   '(:left (path) :right (free-space)))
+
+  ;; Riga in basso: ordinamento e link a sinistra; file nascosti, file "copiati"
+  ;; in attesa di incolla, posizione (12/40) a destra
+  (dirvish-mode-line-format
+   '(:left (sort symlink) :right (omit yank index)))
+
+  ;; Cartelle con più di 20000 file: aperte in modo asincrono con `fd'
+  (dirvish-large-directory-threshold 20000)
+
+  :config
+  ;; Anteprima nel minibuffer mentre scegli un file con C-x C-f
+  (dirvish-peek-mode)
+  ;; Il pannello laterale segue il file del buffer corrente (come treemacs)
+  (dirvish-side-follow-mode)
+
+  :bind
+  (("C-c f" . dirvish)                  ; dirvish a tutto schermo con anteprima
+   ("C-c F" . dirvish-side)             ; pannello laterale, stile "albero del progetto"
+   :map dirvish-mode-map
+   ("?"   . dirvish-dispatch)           ; IL tasto da ricordare: menu di tutti i comandi
+   ("o"   . dirvish-quick-access)       ; salti rapidi (vedi sopra)
+   (";"   . dired-up-directory)         ; cartella superiore (come ^)
+   ("TAB" . dirvish-subtree-toggle)     ; espande/chiude una cartella sul posto
+   ("s"   . dirvish-quicksort)          ; ordina per nome/data/dimensione...
+   ("r"   . dirvish-history-jump)       ; cartelle visitate di recente
+   ("M-f" . dirvish-history-go-forward) ; avanti/indietro come in un browser
+   ("M-b" . dirvish-history-go-backward)
+   ("N"   . dirvish-narrow)             ; filtra i file mentre scrivi
+   ("f"   . dirvish-file-info-menu)     ; info sul file: percorso, permessi, MIME...
+   ("y"   . dirvish-yank-menu)          ; copia/sposta/collega i file marcati
+   ("*"   . dirvish-mark-menu)          ; marcare per tipo, regexp, git...
+   ("v"   . dirvish-vc-menu)            ; git sul file: diff, log, blame
+   ("l"   . dirvish-ls-switches-menu)   ; cambia le opzioni di ls al volo
+   ("a"   . dirvish-setup-menu)         ; accende/spegne colonne e anteprima
+   ("M-e" . dirvish-emerge-menu)        ; raggruppa i file (es. per estensione)
+   ("M-t" . dirvish-layout-toggle)))    ; accende/spegne il pannello di anteprima
+
 #+end_src
 
 * Eshell
 
 #+begin_src emacs-lisp
-
-
 ;;; ===========================================================================
 ;;; ESHELL — shell scritta in Elisp, integrata col resto di Emacs
 ;;; ===========================================================================
 
+;;; --- Prompt ----------------------------------------------------------------
+
 (defun my/eshell-git-branch ()
-  "Ritorna il branch git corrente, o nil."
-  (when (and (fboundp 'magit-get-current-branch)
+  "Ritorna il branch git corrente, o nil.
+Saltato sulle macchine remote: via TRAMP ogni chiamata a git è lenta,
+e il prompt si ridisegna dopo ogni comando."
+  (when (and (not (file-remote-p default-directory))
+             (fboundp 'magit-get-current-branch)
              (locate-dominating-file default-directory ".git"))
     (magit-get-current-branch)))
 
+(defun my/eshell-root-p ()
+  "Non-nil se la shell gira come root (in locale o via TRAMP con sudo)."
+  (equal (or (file-remote-p default-directory 'user) (user-login-name)) "root"))
+
 (defun my/eshell-prompt ()
-  "Prompt su due righe: directory, branch git, esito ultimo comando."
+  "Prompt su due righe: [host remoto] directory, branch git, esito ultimo comando.
+La seconda riga è λ (utente normale) o λ# (root)."
   (let* ((dir    (abbreviate-file-name (eshell/pwd)))
+         (host   (file-remote-p default-directory 'host))
          (branch (my/eshell-git-branch))
          (ok     (zerop eshell-last-command-status)))
     (concat
      "\n"
+     (when host
+       (propertize (concat "[" host "] ") 'face '(:foreground "#e5c07b" :weight bold)))
      (propertize dir 'face '(:foreground "#61afef" :weight bold))
      (when branch
        (concat "  " (propertize (concat " " branch)
@@ -2797,39 +3076,95 @@ sostituirle: i progetti git restano riconosciuti anche senza Projectile.
        (propertize (format "  ✘ %d" eshell-last-command-status)
                    'face '(:foreground "#e06c75")))
      "\n"
-     (propertize "λ" 'face (if ok
-                               '(:foreground "#98c379" :weight bold)
-                             '(:foreground "#e06c75" :weight bold)))
+     (propertize (if (my/eshell-root-p) "λ#" "λ")
+                 'face (if ok
+                           '(:foreground "#98c379" :weight bold)
+                         '(:foreground "#e06c75" :weight bold)))
      " ")))
+
+;;; --- Catturare comando + output come blocchi org ---------------------------
+
+(defun my/blocco-org (comando output &optional dir)
+  "COMANDO e OUTPUT come blocchi org.
+Se DIR è remota (TRAMP), il blocco riceve :dir DIR: con C-c C-c in org
+il comando viene rieseguito sulla stessa macchina."
+  (concat "#+begin_src bash"
+          (when (and dir (file-remote-p dir)) (concat " :dir " dir))
+          "\n" (string-trim comando) "\n#+end_src\n"
+          (unless (string-blank-p output)
+            (concat "#+begin_example\n" (string-trim-right output) "\n#+end_example\n"))))
+
+(defun my/eshell-cattura-ultimo ()
+  "Copia l'ultimo comando di eshell, con il suo output, come blocchi org."
+  (interactive)
+  (let ((comando (buffer-substring-no-properties eshell-last-input-start eshell-last-input-end))
+        (output  (buffer-substring-no-properties (eshell-beginning-of-output)
+                                                 (eshell-end-of-output))))
+    (kill-new (my/blocco-org comando output default-directory))
+    (message "Blocco org copiato: incollalo con C-y")))
+
+;;; --- Comandi nuovi: ogni funzione eshell/NOME diventa il comando NOME ------
+
+(defun eshell/clear ()
+  "Svuota il buffer eshell."
+  (let ((inhibit-read-only t))
+    (erase-buffer)))
+
+(defvar my/kb-dir "~/studio-cert/kb/"
+  "Cartella delle note della knowledge base.")
+
+(defun eshell/kb (&optional nome)
+  "kb → elenco delle note; kb ssh → apre la nota che ha \"ssh\" nel nome."
+  (if (not nome)
+      (dired my/kb-dir)
+    (let ((file (car (directory-files my/kb-dir t (regexp-quote (format "%s" nome))))))
+      (if file
+          (find-file file)
+        (error "Nessuna nota con \"%s\" nel nome" nome))))
+  nil)                                  ; niente "#<buffer ...>" stampato
+
+;; Emacs avviato da EXWM non legge ~/.bashrc: le variabili d'ambiente messe lì
+;; non esistono per Emacs né per i programmi che lancia (eshell, M-x shell,
+;; compile, dirvish...). Le impostiamo qui, una volta per tutti.
+(setenv "LIBVIRT_DEFAULT_URI" "qemu:///system")
+
+;; Salti sulle VM del lab: da qui in poi i comandi girano sulla VM (TRAMP)
+(defun eshell/rocky  () (eshell/cd "/ssh:rocky:~"))
+(defun eshell/debian () (eshell/cd "/ssh:debian:~"))
+
+;;; --- Eshell ----------------------------------------------------------------
 
 (use-package eshell
   :ensure nil
   :bind ("C-c e" . eshell)
   :custom
   (eshell-prompt-function #'my/eshell-prompt)
-  (eshell-prompt-regexp "^λ ")
-  (eshell-highlight-prompt nil)        ; i colori li gestisce il prompt
+  (eshell-prompt-regexp "^λ#? ")        ; λ oppure λ# (root)
+  (eshell-highlight-prompt nil)         ; i colori li gestisce il prompt
   (eshell-history-size 10000)
   (eshell-hist-ignoredups t)
   (eshell-scroll-to-bottom-on-input 'this)
   (eshell-destroy-buffer-when-process-dies t)
   (eshell-banner-message "")
+  :config
+  (with-eval-after-load 'esh-mode
+    (keymap-set eshell-mode-map "C-c b" #'my/eshell-cattura-ultimo))
   :hook
   (eshell-mode . (lambda ()
                    (display-line-numbers-mode -1)
                    (setq-local global-hl-line-mode nil)
-                   ;; Alias comodi
+                   ;; Alias comodi (eshell li salva in ~/.emacs.d/eshell/alias)
                    (eshell/alias "ll"   "ls -lah $*")
                    (eshell/alias "ff"   "find-file $1")
                    (eshell/alias "gs"   "magit-status")
                    (eshell/alias "d"    "dired $1")
-                   (eshell/alias "up"   "sudo pacman -Syu"))))
-
-;; Comando `clear` che pulisce davvero il buffer
-(defun eshell/clear ()
-  "Svuota il buffer eshell."
-  (let ((inhibit-read-only t))
-    (erase-buffer)))
+                   (eshell/alias "up"   "sudo pacman -Syu")
+                   ;; VM del lab. Sono alias e non funzioni elisp: così virsh
+                   ;; gira come processo esterno asincrono e Emacs (cioè EXWM)
+                   ;; non si blocca se polkit apre una finestra.
+                   (eshell/alias "vm"   "virsh $*")              ; vm start rocky-lab
+                   (eshell/alias "vmls" "virsh list --all")
+                   (eshell/alias "vmip" "virsh net-dhcp-leases default"))))
 
 ;; Syntax highlighting dei comandi mentre scrivi (verde = esiste, rosso = no)
 (use-package eshell-syntax-highlighting
@@ -2854,7 +3189,6 @@ sostituirle: i progetti git restano riconosciuti anche senza Projectile.
          (eshell-load . eat-eshell-visual-command-mode))
   :custom
   (eat-kill-buffer-on-exit t))
-
 #+end_src
 
 * Terminal
