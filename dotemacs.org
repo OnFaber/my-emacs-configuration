@@ -1483,6 +1483,7 @@ può sovrascrivere le face (alcuni fanno ereditare i titoli da
 #+begin_src emacs-lisp
 (defvar-keymap my/open-map
   :doc "Apri"
+  "s" #'dirvish-side
   "t" #'vterm
   "e" #'eshell
   "d" #'dired-jump
