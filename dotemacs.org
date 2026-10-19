@@ -196,7 +196,7 @@ Le variabili vengono lette da una shell di login: vanno definite in
 #+begin_src emacs-lisp
 (use-package exec-path-from-shell
   :config
-  (dolist (var '("JAVA_HOME" "PHP_CS_FIXER_IGNORE_ENV" "DOTNET_ROLL_FORWARD"))
+  (dolist (var '("JAVA_HOME" "PHP_CS_FIXER_IGNORE_ENV" "DOTNET_ROLL_FORWARD" "LIBVIRT_DEFAULT_URI"))
     (add-to-list 'exec-path-from-shell-variables var))
   (setq exec-path-from-shell-arguments '("-l"))
   (exec-path-from-shell-initialize))
