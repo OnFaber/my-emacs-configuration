@@ -101,6 +101,9 @@ Il file =init.el= carica i pacchetti e poi questo file.
   "Dove salvare la sessione (file aperti, posizioni, history).")
 (make-directory my/desktop-directory t)
 
+(defvar my/studio-dir "~/Documents/studio-cert/"
+  "Cartella del repository di studio per le certificazioni.")
+
 (use-package desktop
   :ensure nil
   :custom
