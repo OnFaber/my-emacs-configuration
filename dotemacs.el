@@ -38,12 +38,14 @@
   (global-auto-revert-mode 1)   ; ricarica i file cambiati da fuori (git, dotnet format)
   (save-place-mode 1)           ; riapre i file dove eri rimasto
   (global-so-long-mode 1)       ; niente blocchi su righe enormi (JSON, JS minificato)
-  (editorconfig-mode 1)      ; rispetta il .editorconfig dei progetti
 )
+
+(use-package editorconfig
+  :config (editorconfig-mode 1))
 
 (use-package exec-path-from-shell
   :config
-  (dolist (var '("JAVA_HOME" "PHP_CS_FIXER_IGNORE_ENV" "DOTNET_ROLL_FORWARD"))
+  (dolist (var '("JAVA_HOME" "PHP_CS_FIXER_IGNORE_ENV" "DOTNET_ROLL_FORWARD" "LIBVIRT_DEFAULT_URI"))
     (add-to-list 'exec-path-from-shell-variables var))
   (setq exec-path-from-shell-arguments '("-l"))
   (exec-path-from-shell-initialize))
@@ -795,8 +797,6 @@ e la doc finisce a sinistra, sull'altro schermo."
   ;; Nomi leggibili per i tuoi prefissi
   (which-key-add-key-based-replacements
     "C-c g" "git"
-    "C-c t" "terminale"
-    "C-c T" "terminale qui"
     "C-c e" "eshell"))
 
 (use-package which-key-posframe
@@ -1130,6 +1130,7 @@ e la doc finisce a sinistra, sull'altro schermo."
 
 (defvar-keymap my/open-map
   :doc "Apri"
+  "s" #'dirvish-side
   "t" #'vterm
   "e" #'eshell
   "d" #'dired-jump
@@ -1607,6 +1608,8 @@ e la doc finisce a sinistra, sull'altro schermo."
          (ng2-html-mode . emmet-mode)
          (ng2-html-mode . my-ng2-html-setup)))
 
+(add-to-list 'magic-mode-alist '(my/detect-ng2-html . ng2-html-mode))
+
 (add-hook 'sh-mode-hook #'eglot-ensure)
 (add-hook 'bash-ts-mode-hook #'eglot-ensure)
 
@@ -1887,6 +1890,7 @@ Serve perché lo stile di una riga dipende dai tag aperti nelle righe sopra."
   :hook ((csharp-mode csharp-ts-mode) . my/eglot-format-on-save)
   :hook ((csharp-mode csharp-ts-mode) . my/csharp-folding)
   :hook ((csharp-mode csharp-ts-mode) . my/csharp-doc-mode)
+  :hook ((csharp-mode csharp-ts-mode) . my/dotnet-compile-command)
   :bind (:map csharp-ts-mode-map
               ("C-c v" . my/csharp-doc-mode)
               ("C-h C-d" . my/csharp-docs-online)))
@@ -2065,7 +2069,7 @@ Serve da limite alle regole che valgono solo dentro i tag Twig."
   :commands (composer composer-require composer-run-script))
 
 ;; Test: C-c u t (test sotto il cursore), C-c u c (classe), C-c u p (progetto)
-;; ("u" come unit test: C-c t è già consult-theme)
+;; ("u" come unit test)
 (use-package phpunit
   :commands (phpunit-current-test phpunit-current-class phpunit-current-project))
 
@@ -2110,6 +2114,13 @@ Serve da limite alle regole che valgono solo dentro i tag Twig."
                           #'symbols-outline-lsp-fetch)))
   (setq symbols-outline-window-position 'left)
   (symbols-outline-follow-mode))
+
+;;; --- Progetti .NET: compile propone dotnet test ---------------------------
+(defun my/dotnet-compile-command ()
+  "Se la radice del progetto ha una solution, il comando proposto è dotnet test."
+  (when-let* ((pr (project-current))
+              ((directory-files (project-root pr) nil "\\.slnx?\\'")))
+    (setq-local compile-command "dotnet test")))
 
 (use-package compile
   :ensure nil
@@ -2268,8 +2279,6 @@ Serve da limite alle regole che valgono solo dentro i tag Twig."
 
 ;;; ---------------------------------------------------------------------------
 ;;; magit-delta: diff con syntax highlighting (richiede il binario `delta`)
-;;; Disattivato di default: su diff molto grandi può rallentare Magit.
-;;; Togli il commento per provarlo.
 ;;; ---------------------------------------------------------------------------
 
 (use-package magit-delta
@@ -2290,9 +2299,6 @@ Serve da limite alle regole che valgono solo dentro i tag Twig."
   :defer t
   :bind
   (("M-0"       . treemacs-select-window)
-   ("C-x t t"   . treemacs)
-   ("C-x t d"   . treemacs-select-directory)
-   ("C-x t 1"   . treemacs-delete-other-windows)
    ("C-x t B"   . treemacs-bookmark)
    ("C-x t C-t" . treemacs-find-file)
    ("C-x t M-t" . treemacs-find-tag))
@@ -2444,9 +2450,7 @@ Serve da limite alle regole che valgono solo dentro i tag Twig."
   (dirvish-side-follow-mode)
 
   :bind
-  (("C-c f" . dirvish)                  ; dirvish a tutto schermo con anteprima
-   ("C-c F" . dirvish-side)             ; pannello laterale, stile "albero del progetto"
-   :map dirvish-mode-map
+  (:map dirvish-mode-map
    ("?"   . dirvish-dispatch)           ; IL tasto da ricordare: menu di tutti i comandi
    ("o"   . dirvish-quick-access)       ; salti rapidi (vedi sopra)
    (";"   . dired-up-directory)         ; cartella superiore (come ^)
@@ -2532,13 +2536,13 @@ il comando viene rieseguito sulla stessa macchina."
 
 ;;; --- Comandi nuovi: ogni funzione eshell/NOME diventa il comando NOME ------
 
+(defvar my/kb-dir (expand-file-name "kb/" my/studio-dir)
+  "Cartella delle note della knowledge base.")
+
 (defun eshell/clear ()
   "Svuota il buffer eshell."
   (let ((inhibit-read-only t))
     (erase-buffer)))
-
-(defvar my/kb-dir "~/studio-cert/kb/"
-  "Cartella delle note della knowledge base.")
 
 (defun eshell/kb (&optional nome)
   "kb → elenco delle note; kb ssh → apre la nota che ha \"ssh\" nel nome."
@@ -2549,11 +2553,6 @@ il comando viene rieseguito sulla stessa macchina."
           (find-file file)
         (error "Nessuna nota con \"%s\" nel nome" nome))))
   nil)                                  ; niente "#<buffer ...>" stampato
-
-;; Emacs avviato da EXWM non legge ~/.bashrc: le variabili d'ambiente messe lì
-;; non esistono per Emacs né per i programmi che lancia (eshell, M-x shell,
-;; compile, dirvish...). Le impostiamo qui, una volta per tutti.
-(setenv "LIBVIRT_DEFAULT_URI" "qemu:///system")
 
 ;; Salti sulle VM del lab: da qui in poi i comandi girano sulla VM (TRAMP)
 (defun eshell/rocky  () (eshell/cd "/ssh:rocky:~"))
@@ -2959,6 +2958,53 @@ sullo schermo dove stai lavorando."
     (keymap-unset desktop-environment-mode-map "s-l" t)
     (desktop-environment-mode 1)))
 
+(defun peek-overlay-eldoc-message--get-supposed-position ()
+  (save-excursion
+    (forward-line peek-eldoc-message-overlay-position)
+    (point)))
+
+(use-package posframe :ensure t)
+
+(with-eval-after-load 'peek
+  (defvar mio/peek-posframe-buffer " *mio-peek*")
+
+  (defun mio/peek-posframe--testo (backend id)
+    "Testo attorno alla prima definizione di ID, con i colori del buffer sorgente."
+    (when-let* ((defs (xref-backend-definitions backend id))
+                (m (xref-location-marker (xref-item-location (car defs)))))
+      (with-current-buffer (marker-buffer m)
+        (save-excursion
+          (goto-char m)
+          (peek-definition--get-surrounding-text)))))
+
+  (defun mio/peek-posframe-nascondi ()
+    (remove-hook 'pre-command-hook #'mio/peek-posframe-nascondi)
+    (posframe-hide mio/peek-posframe-buffer))
+
+  (defun mio/peek-posframe-definizione ()
+    "Mostra la definizione del simbolo al cursore in un riquadro flottante."
+    (interactive)
+    (let* ((backend (xref-find-backend))
+           (id (xref-backend-identifier-at-point backend))
+           (testo (and id (mio/peek-posframe--testo backend id))))
+      (cond
+       ((not testo) (message "Nessuna definizione per %s" id))
+       ((not (posframe-workable-p)) (message "posframe non disponibile qui"))
+       (t
+        (posframe-show mio/peek-posframe-buffer
+                       :string testo
+                       :position (point)
+                       :poshandler #'posframe-poshandler-point-bottom-left-corner-upward
+                       :max-width (window-body-width)
+                       :background-color (face-background 'peek-overlay-content-face nil t)
+                       :border-width 1
+                       :border-color (face-foreground 'shadow nil t)
+                       :left-fringe 6 :right-fringe 6)
+        ;; si chiude al prossimo comando qualsiasi
+        (add-hook 'pre-command-hook #'mio/peek-posframe-nascondi)))))
+
+  (keymap-global-set "C-x P f" #'mio/peek-posframe-definizione))
+
 ;; peek.el patchato: run-with-timer con repeat t → errore (Emacs ≥ 30), vedi riga 678
 (use-package peek
   :ensure nil
@@ -2971,7 +3017,7 @@ sullo schermo dove stai lavorando."
   (peek-overlay-distance 4)
   (peek-definition-surrounding-above-lines 1)
   (peek-enable-eldoc-message-integration t)
-  (peek-eldoc-message-overlay-position 2)
+  (peek-eldoc-message-overlay-position 0)
   (peek-enable-eldoc-display-integration t)
 :bind (("C-x P p" . peek-overlay-dwim)
        ("C-x P d" . peek-xref-definition)
