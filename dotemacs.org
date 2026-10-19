@@ -1287,8 +1287,7 @@ Il completamento parte da solo dopo 1 carattere: niente tasto manuale
 
 #+end_src
 
-
- Org
+* Org
  
 ** Tipografia
  
