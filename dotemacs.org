@@ -2035,6 +2035,8 @@ LSP-mode è usato solo per Java, Python e Vue.
          (ng2-html-mode . my/prog-mode-setup)
          (ng2-html-mode . emmet-mode)
          (ng2-html-mode . my-ng2-html-setup)))
+
+(add-to-list 'magic-mode-alist '(my/detect-ng2-html . ng2-html-mode))
 #+end_src
 
 
