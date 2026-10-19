@@ -1092,8 +1092,6 @@ Il completamento parte da solo dopo 1 carattere: niente tasto manuale
   ;; Nomi leggibili per i tuoi prefissi
   (which-key-add-key-based-replacements
     "C-c g" "git"
-    "C-c t" "terminale"
-    "C-c T" "terminale qui"
     "C-c e" "eshell"))
 
 (use-package which-key-posframe
